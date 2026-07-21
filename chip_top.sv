@@ -453,6 +453,7 @@ module chip_top #(
 
         .rx              (RX),
         .soft_reset      (mac_soft_reset_pulse),
+        .frame_collect_enable (!image_payload_active),
 
         .rx_byte         (uart_rx_byte),
         .rx_byte_valid   (uart_rx_byte_valid),
