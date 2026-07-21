@@ -61,7 +61,8 @@ module image_burst_rx_deinterleaver (
      */
     assign payload_ready =
         payload_active &&
-        !pending_push;
+        !pending_push &&
+        !fifo_push;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -114,6 +115,16 @@ module image_burst_rx_deinterleaver (
             end
 
             /*
+             * Keep the completed RGB words stable throughout the fifo_push
+             * cycle. Clear them only on the following clock.
+             */
+            else if (fifo_push) begin
+                r_word <= '0;
+                g_word <= '0;
+                b_word <= '0;
+            end
+
+            /*
              * A completed group is held until all three RX FIFOs
              * can accept it together.
              */
@@ -121,11 +132,6 @@ module image_burst_rx_deinterleaver (
                 if (fifo_ready) begin
                     fifo_push    <= 1'b1;
                     pending_push <= 1'b0;
-
-                    r_word <= '0;
-                    g_word <= '0;
-                    b_word <= '0;
-
                     if (final_group_pending) begin
                         final_group_pending <= 1'b0;
                         payload_active      <= 1'b0;
