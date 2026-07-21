@@ -96,7 +96,8 @@ package lab12_pkg;
         RX_CMD_RGF_READ     = 3'd2,
         RX_CMD_IMAGE_READ   = 3'd3,
         RX_CMD_PIXEL_WRITE  = 3'd4,
-        RX_CMD_PIXEL_READ   = 3'd5
+        RX_CMD_PIXEL_READ   = 3'd5,
+        RX_CMD_IMAGE_WRITE  = 3'd6
     } rx_cmd_opcode_t;
 
     // ============================================================
@@ -178,8 +179,10 @@ package lab12_pkg;
     // LAB 12 COMMAND ADDRESSING
     // ============================================================
 
-    // UART address: A2, A1, A0 = 24 bits
-    parameter int unsigned CMD_ADDR_WIDTH = 24;
+    // Global 24-bit byte address.
+    // Transmitted over UART as 6 ASCII hexadecimal characters, MSB first.
+    parameter int unsigned CMD_ADDR_WIDTH       = 24;
+    parameter int unsigned CMD_ADDR_ASCII_CHARS = 6;
 
     // 256x256 image = 65,536 pixels
     parameter int unsigned PIXEL_INDEX_WIDTH = 16;
