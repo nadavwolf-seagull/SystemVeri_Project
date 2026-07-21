@@ -10,9 +10,9 @@ package lab12_pkg;
     // SYSTEM / UART CLOCK
     // ============================================================
 
-    parameter int unsigned UART_CLK_FREQ_HZ = 130_000_000;
+    parameter int unsigned UART_CLK_FREQ_HZ = 280_000_000;
 
-    parameter int unsigned UART_BAUD_RATE    = 8_125_000;
+    parameter int unsigned UART_BAUD_RATE    = 17_500_000;
     parameter int unsigned UART_CLKS_PER_BIT = 16;
     // ============================================================
     // IMAGE
@@ -24,7 +24,7 @@ package lab12_pkg;
     parameter int unsigned COL_WIDTH  = 10;
 
     // ============================================================
-    // RGB ROMS
+    // RGB SRAM BANKS
     // ============================================================
     parameter int unsigned ROM_WORD_WIDTH = 32;
     parameter int unsigned ROM_DEPTH      = 16_384;
@@ -119,7 +119,9 @@ package lab12_pkg;
     // ============================================================
     // FIFO
     // ============================================================
+    // Each FIFO entry holds four samples from one color channel.
     parameter int unsigned FIFO_WIDTH = PIXEL_WIDTH;
+    parameter int unsigned RGB_FIFO_WIDTH = 32;
     parameter int unsigned FIFO_DEPTH = 32;
 
     parameter int unsigned FIFO_AE_LEVEL = 8;
@@ -158,10 +160,9 @@ package lab12_pkg;
     parameter logic [1:0] AHB_HTRANS_NONSEQ = 2'b10;
     parameter logic [1:0] AHB_HTRANS_SEQ    = 2'b11;
 
-    /*
-     * Lab 12 uses SINGLE transfers only.
-     */
+    // Single-pixel accesses use SINGLE. Image DMA uses INCR4.
     parameter logic [2:0] AHB_HBURST_SINGLE = 3'b000;
+    parameter logic [2:0] AHB_HBURST_INCR4  = 3'b011;
 
     /*
      * 32-bit transfer size.
@@ -196,6 +197,25 @@ package lab12_pkg;
 
     // Shared command data width
     parameter int unsigned CMD_DATA_WIDTH = 32;
+
+    // ============================================================
+    // FINAL-PROJECT GLOBAL ADDRESS MAP
+    // ============================================================
+
+    // BAR/RGF control region. The APB bridge uses the low address bits.
+    parameter logic [AHB_ADDR_WIDTH-1:0] RGF_BASE_ADDR = 32'h0000_0000;
+    parameter logic [AHB_ADDR_WIDTH-1:0] RGF_SIZE_BYTES = 32'h0000_1000;
+
+    // Pixel alias: one 32-bit address per RGB pixel.
+    // HWDATA/HRDATA format is {8'h00, R, G, B}.
+    parameter logic [AHB_ADDR_WIDTH-1:0] PIXEL_ALIAS_BASE_ADDR = 32'h0010_0000;
+    parameter logic [AHB_ADDR_WIDTH-1:0] PIXEL_ALIAS_SIZE_BYTES = 32'h0004_0000;
+
+    // DMA channel windows: one 32-bit word contains four channel samples.
+    parameter logic [AHB_ADDR_WIDTH-1:0] R_SRAM_BASE_ADDR = 32'h0020_0000;
+    parameter logic [AHB_ADDR_WIDTH-1:0] G_SRAM_BASE_ADDR = 32'h0021_0000;
+    parameter logic [AHB_ADDR_WIDTH-1:0] B_SRAM_BASE_ADDR = 32'h0022_0000;
+    parameter logic [AHB_ADDR_WIDTH-1:0] CHANNEL_SRAM_SIZE_BYTES = 32'h0001_0000;
     // ============================================================
     // BAR TARGET SELECTION
     // ============================================================
