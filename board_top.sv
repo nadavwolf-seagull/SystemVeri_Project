@@ -124,8 +124,9 @@ module board_top (
     // Active-low permission for FPGA transmission.
     assign cts_n = uart_rts_sync;
 
-    // FPGA is always ready to receive UART commands.
-    assign UART_CTS = 1'b0;
+    // Active-low receive flow control toward the PC:
+    // 0 = FPGA may receive, 1 = PC must pause.
+    assign UART_CTS = rts;
 
     // =========================================================
     // MAIN DESIGN
