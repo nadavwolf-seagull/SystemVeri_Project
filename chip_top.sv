@@ -146,6 +146,8 @@ module chip_top #(
     logic rx_frame_error;
     logic rx_framing_err;
     logic rx_parity_err;
+    logic [7:0] uart_rx_byte;
+    logic       uart_rx_byte_valid;
 
     // =========================================================
     // PARSER -> CLASSIFIER
@@ -263,23 +265,6 @@ module chip_top #(
     );
 
 
-    // ============================================================
-    // AHB Pixel Slave <-> RGB SRAM subsystem
-    // ============================================================
-    logic                       sram_bus_en;
-    logic                       sram_bus_write;
-    logic [ROM_ADDR_W-1:0]      sram_bus_addr;
-
-    logic [ROM_WIDTH-1:0]       sram_r_wdata;
-    logic [ROM_WIDTH-1:0]       sram_g_wdata;
-    logic [ROM_WIDTH-1:0]       sram_b_wdata;
-
-    logic [3:0]                 sram_byte_en;
-
-    logic [ROM_WIDTH-1:0]       sram_r_rdata;
-    logic [ROM_WIDTH-1:0]       sram_g_rdata;
-    logic [ROM_WIDTH-1:0]       sram_b_rdata;
-
     // =========================================================
     // RGF CONTROL / STATUS
     // =========================================================
@@ -293,25 +278,52 @@ module chip_top #(
         rgf_fifo_af_level;
 
     logic mac_soft_reset_pulse;
+    logic        rgf_dma_wr_start;
+    logic        rgf_dma_rd_start;
+    logic [23:0] rgf_img_base;
+    logic [15:0] rgf_img_width;
+    logic [15:0] rgf_img_height;
+    logic        dma_busy;
+    logic        dma_done;
+    logic        dma_error;
 
-    // =========================================================
-    // IMAGE START
-    // =========================================================
-    logic image_start_uart;
-    logic image_start_img;
+    logic [15:0] dma_wr_row_cnt;
+    logic [15:0] dma_wr_col_cnt;
+    logic [15:0] dma_rd_row_cnt;
+    logic [15:0] dma_rd_col_cnt;
 
-    assign uart_tx_busy     = packet_busy;
-    assign image_start_uart = start | rgf_image_start_pulse;
+    logic        dma_rx_push_fast;
+    logic [31:0] dma_rx_r_data_fast;
+    logic [31:0] dma_rx_g_data_fast;
+    logic [31:0] dma_rx_b_data_fast;
+    logic        dma_rx_ready_fast;
 
-    pulse_sync u_image_start_pulse_sync (
-        .src_clk   (clk_uart),
-        .src_rst_n (rst_uart_n),
-        .src_pulse (image_start_uart),
+    logic [31:0] dma_tx_r_data_fast;
+    logic [31:0] dma_tx_g_data_fast;
+    logic [31:0] dma_tx_b_data_fast;
 
-        .dst_clk   (clk_img),
-        .dst_rst_n (rst_img_n),
-        .dst_pulse (image_start_img)
-    );
+    logic        dma_tx_pop_fast;
+    logic        dma_tx_data_valid_fast;
+    logic        dma_tx_empty_fast;
+    logic        dma_tx_underflow_fast;
+
+    logic        dma_rx_almost_full_fast;
+    logic        dma_rx_overflow_fast;
+    logic        dma_rx_underflow_sys;
+    logic        dma_tx_overflow_sys;
+
+    logic [FIFO_LEVEL_W-1:0] dma_rx_af_free_level_fast;
+    logic [FIFO_LEVEL_W-1:0] dma_tx_ae_level_fast;
+    logic [FIFO_LEVEL_W-1:0] dma_rx_ae_level_sys;
+    logic [FIFO_LEVEL_W-1:0] dma_tx_af_free_level_sys;
+
+    logic        image_payload_active;
+    logic        image_payload_ready;
+    logic        image_payload_done;
+    logic        image_payload_error;
+
+    assign uart_tx_busy = packet_busy;
+
 
     // =========================================================
     // FIFO THRESHOLDS
@@ -325,24 +337,29 @@ module chip_top #(
     assign af_level =
         rgf_fifo_af_level[FIFO_LEVEL_W-1:0];
 
-    // =========================================================
-    // IMAGE CLUSTER -> IMAGE COMPOSER
-    // =========================================================
-    logic fifo_pop_req;
+    assign dma_rx_af_free_level_fast = af_level;
+    assign dma_tx_ae_level_fast      = ae_level;
+    assign dma_rx_ae_level_sys       = ae_level;
+    assign dma_tx_af_free_level_sys  = af_level;
 
-    logic [FIFO_WIDTH-1:0]
-        fifo_data_out;
 
     // =========================================================
-    // IMAGE COMPOSER PACKET INTERFACE
+    // DMA IMAGE BURST PACKET INTERFACE
     // =========================================================
-    logic image_packet_valid;
+    logic burst_packet_valid;
 
-    logic [PACKET_WIDTH-1:0]
-        image_packet_data;
+    logic [lab12_pkg::UART_TX_MAX_PACKET_WIDTH-1:0]
+        burst_packet_data;
 
-    logic image_packet_ready;
-    logic image_packet_done;
+    logic [lab12_pkg::UART_TX_PACKET_LEN_WIDTH-1:0]
+        burst_packet_len;
+
+    logic burst_packet_ready;
+    logic burst_packet_done;
+
+    logic burst_tx_active;
+    logic burst_tx_done;
+    logic burst_tx_error;
 
     // =========================================================
     // CONTROL RESPONSE PACKET INTERFACE
@@ -363,37 +380,65 @@ module chip_top #(
     // =========================================================
     logic uart_packet_valid;
 
-    logic [PACKET_WIDTH-1:0]
+    logic [lab12_pkg::UART_TX_MAX_PACKET_WIDTH-1:0]
         uart_packet_data;
+
+    logic [lab12_pkg::UART_TX_PACKET_LEN_WIDTH-1:0]
+        uart_packet_len;
 
     logic packet_ready;
     logic packet_done;
 
+    logic uart_owner_control;
+
     /*
-     * Control responses have priority over full-image packets.
-     * Only the selected producer receives ready/done.
+     * Control responses have priority over DMA image bursts.
+     * The legacy image composer is disconnected from UART and will
+     * be removed together with the old image path.
      */
     assign uart_packet_valid =
-        control_packet_valid ?
-        control_packet_valid :
-        image_packet_valid;
+        control_packet_valid ||
+        burst_packet_valid;
 
     assign uart_packet_data =
         control_packet_valid ?
-        control_packet_data :
-        image_packet_data;
+        {control_packet_data, 24'h000000} :
+        burst_packet_data;
+
+    assign uart_packet_len =
+        control_packet_valid ?
+        lab12_pkg::UART_TX_PACKET_LEN_WIDTH'(
+            lab12_pkg::TX_PACKET_BYTES
+        ) :
+        burst_packet_len;
 
     assign control_packet_ready =
         packet_ready;
 
-    assign image_packet_ready =
-        packet_ready && !control_packet_valid;
+    assign burst_packet_ready =
+        packet_ready &&
+        !control_packet_valid;
 
     assign control_packet_done =
-        packet_done && control_packet_valid;
+        packet_done &&
+        uart_owner_control;
 
-    assign image_packet_done =
-        packet_done && !control_packet_valid;
+    assign burst_packet_done =
+        packet_done &&
+        !uart_owner_control;
+
+    /*
+     * Remember which producer won the UART handshake. The producer
+     * may lower packet_valid before packet_done is asserted.
+     */
+    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
+        if (!rst_uart_n) begin
+            uart_owner_control <= 1'b0;
+        end
+        else if (uart_packet_valid && packet_ready) begin
+            uart_owner_control <= control_packet_valid;
+        end
+    end
 
     // =========================================================
     // UART RX TOP
@@ -409,8 +454,8 @@ module chip_top #(
         .rx              (RX),
         .soft_reset      (mac_soft_reset_pulse),
 
-        .rx_byte         (),
-        .rx_byte_valid   (),
+        .rx_byte         (uart_rx_byte),
+        .rx_byte_valid   (uart_rx_byte_valid),
 
         .frame_data      (rx_frame_data),
         .frame_len       (rx_frame_len),
@@ -420,6 +465,65 @@ module chip_top #(
         .rx_parity_err   (rx_parity_err),
         .rx_frame_error  (rx_frame_error),
         .rx_busy         (uart_rx_busy)
+    );
+
+    // =========================================================
+    // IMAGE BURST RX DEINTERLEAVER
+    // =========================================================
+    image_burst_rx_deinterleaver u_image_burst_rx_deinterleaver (
+        .clk            (clk_uart),
+        .rst_n          (rst_uart_n),
+
+        .start          (rgf_dma_wr_start),
+        .img_width      (rgf_img_width),
+        .img_height     (rgf_img_height),
+
+        .rx_byte        (uart_rx_byte),
+        .rx_byte_valid  (
+            uart_rx_byte_valid &&
+            image_payload_active
+        ),
+
+        .fifo_ready     (dma_rx_ready_fast),
+
+        .fifo_push      (dma_rx_push_fast),
+        .fifo_r_data    (dma_rx_r_data_fast),
+        .fifo_g_data    (dma_rx_g_data_fast),
+        .fifo_b_data    (dma_rx_b_data_fast),
+
+        .payload_active (image_payload_active),
+        .payload_ready  (image_payload_ready),
+        .payload_done   (image_payload_done),
+        .payload_error  (image_payload_error)
+    );
+
+    // =========================================================
+    // IMAGE BURST TX PACKER
+    // =========================================================
+    image_burst_tx_packer u_image_burst_tx_packer (
+        .clk             (clk_uart),
+        .rst_n           (rst_uart_n),
+
+        .start           (rgf_dma_rd_start),
+        .img_width       (rgf_img_width),
+        .img_height      (rgf_img_height),
+
+        .fifo_pop        (dma_tx_pop_fast),
+        .fifo_r_data     (dma_tx_r_data_fast),
+        .fifo_g_data     (dma_tx_g_data_fast),
+        .fifo_b_data     (dma_tx_b_data_fast),
+        .fifo_data_valid (dma_tx_data_valid_fast),
+        .fifo_empty      (dma_tx_empty_fast),
+
+        .packet_valid    (burst_packet_valid),
+        .packet_data     (burst_packet_data),
+        .packet_len      (burst_packet_len),
+        .packet_ready    (burst_packet_ready),
+        .packet_done     (burst_packet_done),
+
+        .active          (burst_tx_active),
+        .done            (burst_tx_done),
+        .error           (burst_tx_error)
     );
 
     // =========================================================
@@ -533,39 +637,65 @@ module chip_top #(
     );
 
     // =========================================================
-    // INTERNAL AHB-LITE INTERFACE
+    // FINAL-PROJECT DMA / MEMORY CLUSTER
     // =========================================================
-    ahb_lite_if #(
-        .ADDR_WIDTH (lab12_pkg::AHB_ADDR_WIDTH),
-        .DATA_WIDTH (lab12_pkg::AHB_DATA_WIDTH)
-    ) image_ahb (
-        .HCLK    (clk_uart),
-        .HRESETn (rst_uart_n)
+    final_project_dma_cluster #(
+        .FIFO_DEPTH (FIFO_DEPTH)
+    ) u_final_project_dma_cluster (
+        .clk_fast              (clk_uart),
+        .rst_fast_n            (rst_uart_n),
+        .clk_sys               (clk_ctrl),
+        .rst_sys_n             (rst_ctrl_n),
+
+        .dma_wr_start          (rgf_dma_wr_start),
+        .dma_rd_start          (rgf_dma_rd_start),
+        .img_base              (rgf_img_base),
+        .img_width             (rgf_img_width),
+        .img_height            (rgf_img_height),
+        .dma_busy              (dma_busy),
+        .dma_done              (dma_done),
+        .dma_error             (dma_error),
+        .wr_row_cnt            (dma_wr_row_cnt),
+        .wr_col_cnt            (dma_wr_col_cnt),
+        .rd_row_cnt            (dma_rd_row_cnt),
+        .rd_col_cnt            (dma_rd_col_cnt),
+
+        .bar_cmd_valid         (ahb_cmd_valid),
+        .bar_cmd_ready         (ahb_cmd_ready),
+        .bar_cmd_write         (ahb_cmd_write),
+        .bar_cmd_addr          (ahb_cmd_addr),
+        .bar_cmd_data          (ahb_cmd_data),
+        .bar_rsp_valid         (ahb_rsp_valid),
+        .bar_rsp_ready         (ahb_rsp_ready),
+        .bar_rsp_addr          (ahb_rsp_addr),
+        .bar_rsp_data          (ahb_rsp_data),
+        .bar_rsp_error         (ahb_rsp_error),
+        .ahb_error_pulse       (ahb_error_pulse),
+
+        .rx_push_fast          (dma_rx_push_fast),
+        .rx_r_data_fast        (dma_rx_r_data_fast),
+        .rx_g_data_fast        (dma_rx_g_data_fast),
+        .rx_b_data_fast        (dma_rx_b_data_fast),
+        .rx_af_free_level_fast (dma_rx_af_free_level_fast),
+        .rx_ready_fast         (dma_rx_ready_fast),
+        .rx_almost_full_fast   (dma_rx_almost_full_fast),
+        .rx_overflow_fast      (dma_rx_overflow_fast),
+
+        .tx_pop_fast           (dma_tx_pop_fast),
+        .tx_ae_level_fast      (dma_tx_ae_level_fast),
+        .tx_r_data_fast        (dma_tx_r_data_fast),
+        .tx_g_data_fast        (dma_tx_g_data_fast),
+        .tx_b_data_fast        (dma_tx_b_data_fast),
+        .tx_data_valid_fast    (dma_tx_data_valid_fast),
+        .tx_empty_fast         (dma_tx_empty_fast),
+        .tx_underflow_fast     (dma_tx_underflow_fast),
+
+        .rx_ae_level_sys       (dma_rx_ae_level_sys),
+        .tx_af_free_level_sys  (dma_tx_af_free_level_sys),
+        .rx_underflow_sys      (dma_rx_underflow_sys),
+        .tx_overflow_sys       (dma_tx_overflow_sys)
     );
 
-    // =========================================================
-    // AHB-LITE MASTER
-    // =========================================================
-    ahb_master_fsm u_ahb_master_fsm (
-        .clk             (clk_uart),
-        .rst_n           (rst_uart_n),
-
-        .cmd_valid       (ahb_cmd_valid),
-        .cmd_ready       (ahb_cmd_ready),
-        .cmd_write       (ahb_cmd_write),
-        .cmd_addr        (ahb_cmd_addr),
-        .cmd_data        (ahb_cmd_data),
-
-        .rsp_valid       (ahb_rsp_valid),
-        .rsp_ready       (ahb_rsp_ready),
-        .rsp_addr        (ahb_rsp_addr),
-        .rsp_data        (ahb_rsp_data),
-        .rsp_error       (ahb_rsp_error),
-
-        .ahb_error_pulse (ahb_error_pulse),
-
-        .ahb             (image_ahb)
-    );
 
     // =========================================================
     // APB RGF SLAVE
@@ -581,11 +711,22 @@ module chip_top #(
         .apb                  (rgf_apb_if),
 
         .image_start_pulse    (rgf_image_start_pulse),
+        .dma_wr_start         (rgf_dma_wr_start),
+        .dma_rd_start         (rgf_dma_rd_start),
+        .img_base             (rgf_img_base),
+        .img_width            (rgf_img_width),
+        .img_height           (rgf_img_height),
         .fifo_ae_level        (rgf_fifo_ae_level),
         .fifo_af_level        (rgf_fifo_af_level),
 
-        .seq_busy             (seq_busy),
-        .image_done           (image_tx_done),
+        .dma_busy             (dma_busy),
+        .dma_done             (dma_done),
+        .dma_error            (dma_error),
+
+        .wr_row_cnt           (dma_wr_row_cnt),
+        .wr_col_cnt           (dma_wr_col_cnt),
+        .rd_row_cnt           (dma_rd_row_cnt),
+        .rd_col_cnt           (dma_rd_col_cnt),
         .fifo_empty           (fifo_empty),
         .fifo_full            (fifo_full),
         .fifo_error           (fifo_error),
@@ -627,151 +768,20 @@ module chip_top #(
         .response_error (control_response_error)
     );
 
-    // =========================================================
-    // AHB-LITE PIXEL SLAVE
-    // =========================================================
-    ahb_pixel_slave #(
-        .HADDR_WIDTH (lab12_pkg::AHB_ADDR_WIDTH),
-        .HDATA_WIDTH (lab12_pkg::AHB_DATA_WIDTH),
-        .SRAM_ADDR_W (ROM_ADDR_W)
-    ) u_ahb_pixel_slave (
-        .HCLK           (clk_uart),
-        .HRESETn        (rst_uart_n),
-
-        // AHB Master -> Pixel Slave
-        .HADDR          (image_ahb.HADDR),
-        .HTRANS         (image_ahb.HTRANS),
-        .HWRITE         (image_ahb.HWRITE),
-        .HSIZE          (image_ahb.HSIZE),
-        .HWDATA         (image_ahb.HWDATA),
-
-        // Pixel Slave -> AHB Master
-        .HRDATA         (image_ahb.HRDATA),
-        .HREADY         (image_ahb.HREADY),
-        .HRESP          (image_ahb.HRESP),
-
-        // Pixel Slave -> RGB SRAM Port B
-        .sram_bus_en    (sram_bus_en),
-        .sram_bus_write (sram_bus_write),
-        .sram_bus_addr  (sram_bus_addr),
-
-        .sram_r_wdata   (sram_r_wdata),
-        .sram_g_wdata   (sram_g_wdata),
-        .sram_b_wdata   (sram_b_wdata),
-
-        .sram_byte_en   (sram_byte_en),
-
-        // RGB SRAM Port B -> Pixel Slave
-        .sram_r_rdata   (sram_r_rdata),
-        .sram_g_rdata   (sram_g_rdata),
-        .sram_b_rdata   (sram_b_rdata)
-    );
-    // =========================================================
-    // IMAGE CLUSTER
-    // =========================================================
-    seq_img_cluster #(
-        .IMG_WIDTH       (IMG_WIDTH),
-        .IMG_HEIGHT      (IMG_HEIGHT),
-
-        .ROM_DEPTH       (ROM_DEPTH),
-        .ROM_WIDTH       (ROM_WIDTH),
-        .ROM_ADDR_W      (ROM_ADDR_W),
-
-        .FIFO_WIDTH      (FIFO_WIDTH),
-        .FIFO_DEPTH      (FIFO_DEPTH),
-
-        .RED_INIT_FILE   (RED_INIT_FILE),
-        .GREEN_INIT_FILE (GREEN_INIT_FILE),
-        .BLUE_INIT_FILE  (BLUE_INIT_FILE)
-    ) u_seq_img_cluster (
-        .wr_clk   (clk_img),
-        .wr_rst_n (rst_img_n),
-
-        .rd_clk   (clk_uart),
-        .rd_rst_n (rst_uart_n),
-
-        .start    (image_start_img),
-
-        .fifo_pop_req      (fifo_pop_req),
-
-        .ae_level          (ae_level),
-        .af_level          (af_level),
-
-        .fifo_data_out     (fifo_data_out),
-
-        .fifo_level        (fifo_level),
-        .fifo_empty        (fifo_empty),
-        .fifo_almost_empty (fifo_almost_empty),
-        .fifo_half_full    (fifo_half_full),
-        .fifo_almost_full  (fifo_almost_full),
-        .fifo_full         (fifo_full),
-        .fifo_error        (fifo_error),
-
-        // AHB Pixel Slave -> SRAM Port B
-        .sram_bus_en       (sram_bus_en),
-        .sram_bus_write    (sram_bus_write),
-        .sram_bus_addr     (sram_bus_addr),
-
-        .sram_r_wdata      (sram_r_wdata),
-        .sram_g_wdata      (sram_g_wdata),
-        .sram_b_wdata      (sram_b_wdata),
-
-        .sram_byte_en      (sram_byte_en),
-
-        .sram_r_rdata      (sram_r_rdata),
-        .sram_g_rdata      (sram_g_rdata),
-        .sram_b_rdata      (sram_b_rdata),
-
-        .row_cnt           (seq_row_cnt),
-        .col_cnt           (seq_col_cnt),
-        .transfer_done     (seq_transfer_done),
-        .busy              (seq_busy),
-        .rts               (rts)
-    );
-
-    // =========================================================
-    // FULL-IMAGE MESSAGE COMPOSER
-    // =========================================================
-    message_composer #(
-        .IMG_WIDTH         (IMG_WIDTH),
-        .IMG_HEIGHT        (IMG_HEIGHT),
-
-        .ROW_WIDTH         (lab12_pkg::ROW_WIDTH),
-        .COL_WIDTH         (lab12_pkg::COL_WIDTH),
-
-        .PIXEL_WIDTH       (FIFO_WIDTH),
-
-        .COORD_FIELD_WIDTH (lab12_pkg::COORD_FIELD_WIDTH),
-        .PACKET_WIDTH      (PACKET_WIDTH)
-    ) u_message_composer (
-        .sys_clk       (clk_uart),
-        .rst_n         (rst_uart_n),
-
-        .start         (image_start_uart),
-
-        .fifo_empty    (fifo_empty),
-        .fifo_data_out (fifo_data_out),
-        .fifo_pop_req  (fifo_pop_req),
-
-        .packet_ready  (image_packet_ready),
-        .packet_done   (image_packet_done),
-
-        .packet_valid  (image_packet_valid),
-        .packet_data   (image_packet_data),
-
-        .tx_row_cnt    (tx_row_cnt),
-        .tx_col_cnt    (tx_col_cnt),
-
-        .composer_busy (composer_busy),
-        .image_tx_done (image_tx_done)
-    );
 
     // =========================================================
     // UART TX
     // =========================================================
     uart_tx_top #(
-        .PACKET_BYTES (PACKET_BYTES),
-        .PACKET_WIDTH (PACKET_WIDTH),
+        .MAX_PACKET_BYTES (
+            lab12_pkg::UART_TX_MAX_PACKET_BYTES
+        ),
+        .MAX_PACKET_WIDTH (
+            lab12_pkg::UART_TX_MAX_PACKET_WIDTH
+        ),
+        .PACKET_LEN_WIDTH (
+            lab12_pkg::UART_TX_PACKET_LEN_WIDTH
+        ),
         .CLKS_PER_BIT (CLKS_PER_BIT)
     ) u_uart_tx_top (
         .sys_clk      (clk_uart),
@@ -782,6 +792,7 @@ module chip_top #(
 
         .packet_valid (uart_packet_valid),
         .packet_data  (uart_packet_data),
+        .packet_len   (uart_packet_len),
         .packet_ready (packet_ready),
 
         .packet_busy  (packet_busy),
@@ -793,6 +804,34 @@ module chip_top #(
     // =========================================================
     // DEBUG ASSIGNMENTS
     // =========================================================
+    // Legacy top-level debug ports are mapped to the final-project
+    // DMA and FIFO-bank status signals.
+    assign seq_transfer_done = dma_done;
+    assign image_tx_done     = burst_tx_done;
+    assign seq_busy          = dma_busy;
+    assign composer_busy     = burst_tx_active;
+
+    assign fifo_level        = '0;
+    assign fifo_empty        = dma_tx_empty_fast;
+    assign fifo_almost_empty = dma_tx_empty_fast;
+    assign fifo_half_full    = 1'b0;
+    assign fifo_almost_full  = dma_rx_almost_full_fast;
+    assign fifo_full         = !dma_rx_ready_fast;
+    assign fifo_error        =
+        dma_rx_overflow_fast  |
+        dma_rx_underflow_sys  |
+        dma_tx_overflow_sys   |
+        dma_tx_underflow_fast |
+        image_payload_error   |
+        burst_tx_error;
+
+    assign seq_row_cnt = dma_wr_row_cnt[9:0];
+    assign seq_col_cnt = dma_wr_col_cnt[9:0];
+    assign tx_row_cnt  = dma_rd_row_cnt[lab12_pkg::ROW_WIDTH-1:0];
+    assign tx_col_cnt  = dma_rd_col_cnt[lab12_pkg::COL_WIDTH-1:0];
+
+    // RTS is active-low at board level: 0 means the FPGA can receive.
+    assign rts = image_payload_active && !image_payload_ready;
     assign rx_parse_error =
         parse_error;
 
@@ -803,7 +842,8 @@ module chip_top #(
         rgf_error_int |
         apb_error_pulse |
         ahb_error_pulse |
-        control_response_error;
+        control_response_error |
+        fifo_error;
 
     assign rx_parity_error_dbg =
         rx_parity_err;

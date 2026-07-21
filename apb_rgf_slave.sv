@@ -21,14 +21,27 @@ module apb_rgf_slave #(
     // APB slave bus
     apb_if.slave apb,
 
-    // Selected register outputs toward the system
+    // DMA configuration and control outputs
     output logic                  image_start_pulse,
+    output logic                  dma_wr_start,
+    output logic                  dma_rd_start,
+    output logic [23:0]           img_base,
+    output logic [15:0]           img_width,
+    output logic [15:0]           img_height,
+
     output logic [DATA_WIDTH-1:0] fifo_ae_level,
     output logic [DATA_WIDTH-1:0] fifo_af_level,
 
-    // Status inputs from the system
-    input  logic                  seq_busy,
-    input  logic                  image_done,
+    // DMA status and progress inputs
+    input  logic                  dma_busy,
+    input  logic                  dma_done,
+    input  logic                  dma_error,
+
+    input  logic [15:0]           wr_row_cnt,
+    input  logic [15:0]           wr_col_cnt,
+    input  logic [15:0]           rd_row_cnt,
+    input  logic [15:0]           rd_col_cnt,
+
     input  logic                  fifo_empty,
     input  logic                  fifo_full,
     input  logic                  fifo_error,
@@ -147,11 +160,22 @@ module apb_rgf_slave #(
         .error                (rgf_error_int),
 
         .image_start_pulse    (image_start_pulse),
+        .dma_wr_start         (dma_wr_start),
+        .dma_rd_start         (dma_rd_start),
+        .img_base             (img_base),
+        .img_width            (img_width),
+        .img_height           (img_height),
         .fifo_ae_level        (fifo_ae_level),
         .fifo_af_level        (fifo_af_level),
 
-        .seq_busy             (seq_busy),
-        .image_done           (image_done),
+        .dma_busy             (dma_busy),
+        .dma_done             (dma_done),
+        .dma_error            (dma_error),
+
+        .wr_row_cnt           (wr_row_cnt),
+        .wr_col_cnt           (wr_col_cnt),
+        .rd_row_cnt           (rd_row_cnt),
+        .rd_col_cnt           (rd_col_cnt),
         .fifo_empty           (fifo_empty),
         .fifo_full            (fifo_full),
         .fifo_error           (fifo_error),

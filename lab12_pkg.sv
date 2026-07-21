@@ -55,6 +55,19 @@ package lab12_pkg;
         TX_PACKET_WIDTH / 8;
 
     // ============================================================
+    // FINAL-PROJECT UART TX PACKET
+    // ============================================================
+
+    // A group of four RGB pixels contains 12 bytes:
+    // R0,G0,B0 ... R3,G3,B3.
+    parameter int unsigned UART_TX_MAX_PACKET_BYTES = 12;
+    parameter int unsigned UART_TX_MAX_PACKET_WIDTH =
+        UART_TX_MAX_PACKET_BYTES * 8;
+
+    parameter int unsigned UART_TX_PACKET_LEN_WIDTH =
+        $clog2(UART_TX_MAX_PACKET_BYTES + 1);
+
+    // ============================================================
     // UART RX / COMMAND PARSER
     // ============================================================
 
@@ -287,6 +300,7 @@ package lab12_pkg;
     parameter int unsigned RGF_ERROR_FIFO_ERROR_BIT    = 2;
     parameter int unsigned RGF_ERROR_UART_PARITY_BIT  = 3;
     parameter int unsigned RGF_ERROR_UART_FRAMING_BIT = 4;
+    parameter int unsigned RGF_ERROR_DMA_ERROR_BIT     = 5;
 
     // ============================================================
     // VERSION REGISTER
