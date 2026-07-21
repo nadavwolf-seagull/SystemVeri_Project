@@ -36,7 +36,7 @@ module chip_top #(
     // FIFO
     // =========================================================
     parameter int unsigned FIFO_WIDTH =
-        lab12_pkg::FIFO_WIDTH,
+        lab12_pkg::RGB_FIFO_WIDTH,
 
     parameter int unsigned FIFO_DEPTH =
         lab12_pkg::FIFO_DEPTH,
@@ -73,7 +73,7 @@ module chip_top #(
     input logic clk_img,
     input logic rst_img_n,
 
-    // UART, APB and AHB clock/reset
+    // UART fast-domain clock/reset
     input logic clk_uart,
     input logic rst_uart_n,
 
@@ -135,6 +135,19 @@ module chip_top #(
     localparam int unsigned FIFO_LEVEL_W =
         $clog2(FIFO_DEPTH + 1);
 
+    localparam int unsigned COMMAND_CDC_W =
+        $bits(lab12_pkg::rx_cmd_opcode_t) +
+        lab12_pkg::CMD_ADDR_WIDTH +
+        lab12_pkg::CMD_DATA_WIDTH;
+
+    localparam int unsigned RESPONSE_CDC_W =
+        $bits(lab12_pkg::bar_target_t) +
+        lab12_pkg::CMD_ADDR_WIDTH +
+        lab12_pkg::CMD_DATA_WIDTH + 1;
+
+    localparam int unsigned DMA_CFG_CDC_W =
+        2 + 16 + 16 + (2 * FIFO_LEVEL_W);
+
     // =========================================================
     // RX TOP -> PARSER
     // =========================================================
@@ -179,6 +192,15 @@ module chip_top #(
         cmd_data;
 
     logic classifier_error;
+
+    // Fast classifier -> system BAR handshake synchronizer.
+    logic [COMMAND_CDC_W-1:0] command_cdc_src_data;
+    logic [COMMAND_CDC_W-1:0] command_cdc_dst_data;
+    logic                     sys_cmd_valid;
+    logic                     sys_cmd_ready;
+    lab12_pkg::rx_cmd_opcode_t sys_cmd_opcode;
+    logic [lab12_pkg::CMD_ADDR_WIDTH-1:0] sys_cmd_addr;
+    logic [lab12_pkg::CMD_DATA_WIDTH-1:0] sys_cmd_data;
 
     // =========================================================
     // BAR -> APB MASTER
@@ -253,6 +275,16 @@ module chip_top #(
 
     logic bar_rsp_error;
 
+    // System BAR -> fast response-composer handshake synchronizer.
+    logic [RESPONSE_CDC_W-1:0] response_cdc_src_data;
+    logic [RESPONSE_CDC_W-1:0] response_cdc_dst_data;
+    logic fast_rsp_valid;
+    logic fast_rsp_ready;
+    lab12_pkg::bar_target_t fast_rsp_source;
+    logic [lab12_pkg::CMD_ADDR_WIDTH-1:0] fast_rsp_addr;
+    logic [lab12_pkg::CMD_DATA_WIDTH-1:0] fast_rsp_data;
+    logic fast_rsp_error;
+
     // =========================================================
     // APB INTERFACE
     // =========================================================
@@ -260,8 +292,8 @@ module chip_top #(
         .ADDR_WIDTH (lab12_pkg::APB_ADDR_WIDTH),
         .DATA_WIDTH (lab12_pkg::APB_DATA_WIDTH)
     ) rgf_apb_if (
-        .PCLK    (clk_uart),
-        .PRESETn (rst_uart_n)
+        .PCLK    (clk_ctrl),
+        .PRESETn (rst_ctrl_n)
     );
 
 
@@ -278,6 +310,7 @@ module chip_top #(
         rgf_fifo_af_level;
 
     logic mac_soft_reset_pulse;
+    logic mac_soft_reset_fast;
     logic        rgf_dma_wr_start;
     logic        rgf_dma_rd_start;
     logic [23:0] rgf_img_base;
@@ -286,6 +319,21 @@ module chip_top #(
     logic        dma_busy;
     logic        dma_done;
     logic        dma_error;
+    logic        dma_error_status_sys;
+
+    logic        dma_cfg_src_ready;
+    logic        dma_cfg_dst_valid;
+    logic [DMA_CFG_CDC_W-1:0] dma_cfg_src_data;
+    logic [DMA_CFG_CDC_W-1:0] dma_cfg_dst_data;
+    logic        dma_cfg_missed;
+    logic        dma_wr_start_sys;
+    logic        dma_rd_start_sys;
+    logic        dma_wr_start_fast;
+    logic        dma_rd_start_fast;
+    logic        dma_cfg_wr_start_fast;
+    logic        dma_cfg_rd_start_fast;
+    logic [15:0] dma_img_width_fast;
+    logic [15:0] dma_img_height_fast;
 
     logic [15:0] dma_wr_row_cnt;
     logic [15:0] dma_wr_col_cnt;
@@ -312,15 +360,30 @@ module chip_top #(
     logic        dma_rx_underflow_sys;
     logic        dma_tx_overflow_sys;
 
+    logic [FIFO_LEVEL_W-1:0] dma_rx_level_fast;
+    logic [FIFO_LEVEL_W-1:0] dma_rx_level_sys;
+    logic [FIFO_LEVEL_W-1:0] dma_tx_level_fast;
+    logic [FIFO_LEVEL_W-1:0] dma_tx_level_sys;
+
     logic [FIFO_LEVEL_W-1:0] dma_rx_af_free_level_fast;
     logic [FIFO_LEVEL_W-1:0] dma_tx_ae_level_fast;
     logic [FIFO_LEVEL_W-1:0] dma_rx_ae_level_sys;
     logic [FIFO_LEVEL_W-1:0] dma_tx_af_free_level_sys;
 
+    logic [2:0] fast_status_event;
+    logic [2:0] fast_status_pending;
+    logic       fast_status_src_ready;
+    logic       fast_status_dst_valid;
+    logic [2:0] fast_status_dst_data;
+    logic [2:0] fast_status_event_sys;
+    logic dma_tx_empty_sys;
+    logic dma_rx_full_sys;
+
     logic        image_payload_active;
     logic        image_payload_ready;
     logic        image_payload_done;
     logic        image_payload_error;
+    logic        image_write_command_pending;
 
     assign uart_tx_busy = packet_busy;
 
@@ -337,10 +400,58 @@ module chip_top #(
     assign af_level =
         rgf_fifo_af_level[FIFO_LEVEL_W-1:0];
 
-    assign dma_rx_af_free_level_fast = af_level;
-    assign dma_tx_ae_level_fast      = ae_level;
+    // System-side FIFO thresholds are local to the RGF domain. Fast-side
+    // copies arrive atomically with the DMA descriptor below.
     assign dma_rx_ae_level_sys       = ae_level;
     assign dma_tx_af_free_level_sys  = af_level;
+
+    assign dma_cfg_src_data = {
+        rgf_dma_wr_start,
+        rgf_dma_rd_start,
+        rgf_img_width,
+        rgf_img_height,
+        ae_level,
+        af_level
+    };
+
+    assign dma_cfg_missed =
+        (rgf_dma_wr_start || rgf_dma_rd_start) && !dma_cfg_src_ready;
+
+    // Do not start the system DMA unless the matching fast-domain descriptor
+    // was accepted in the same system-clock cycle.
+    assign dma_wr_start_sys = rgf_dma_wr_start && dma_cfg_src_ready;
+    assign dma_rd_start_sys = rgf_dma_rd_start && dma_cfg_src_ready;
+
+    cdc_handshake_sync #(
+        .DATA_WIDTH(DMA_CFG_CDC_W)
+    ) u_dma_config_handshake (
+        .src_clk   (clk_ctrl),
+        .src_rst_n (rst_ctrl_n),
+        .src_valid (rgf_dma_wr_start || rgf_dma_rd_start),
+        .src_ready (dma_cfg_src_ready),
+        .src_data  (dma_cfg_src_data),
+        .dst_clk   (clk_uart),
+        .dst_rst_n (rst_uart_n),
+        .dst_valid (dma_cfg_dst_valid),
+        .dst_ready (1'b1),
+        .dst_data  (dma_cfg_dst_data)
+    );
+
+    assign {
+        dma_cfg_wr_start_fast,
+        dma_cfg_rd_start_fast,
+        dma_img_width_fast,
+        dma_img_height_fast,
+        dma_tx_ae_level_fast,
+        dma_rx_af_free_level_fast
+    } = dma_cfg_dst_data;
+
+    assign dma_wr_start_fast =
+        dma_cfg_dst_valid && dma_cfg_wr_start_fast;
+    assign dma_rd_start_fast =
+        dma_cfg_dst_valid && dma_cfg_rd_start_fast;
+
+    assign dma_error_status_sys = dma_error | dma_cfg_missed;
 
 
     // =========================================================
@@ -441,6 +552,87 @@ module chip_top #(
     end
 
     // =========================================================
+    // FAST COMMAND <-> SYSTEM CONTROL CDC
+    // =========================================================
+    assign command_cdc_src_data = {cmd_opcode, cmd_addr, cmd_data};
+    assign {sys_cmd_opcode, sys_cmd_addr, sys_cmd_data} =
+        command_cdc_dst_data;
+
+    cdc_handshake_sync #(
+        .DATA_WIDTH(COMMAND_CDC_W)
+    ) u_command_handshake (
+        .src_clk   (clk_uart),
+        .src_rst_n (rst_uart_n),
+        .src_valid (cmd_valid),
+        .src_ready (cmd_ready),
+        .src_data  (command_cdc_src_data),
+        .dst_clk   (clk_ctrl),
+        .dst_rst_n (rst_ctrl_n),
+        .dst_valid (sys_cmd_valid),
+        .dst_ready (sys_cmd_ready),
+        .dst_data  (command_cdc_dst_data)
+    );
+
+    assign response_cdc_src_data = {
+        bar_rsp_source,
+        bar_rsp_addr,
+        bar_rsp_data,
+        bar_rsp_error
+    };
+
+    assign {
+        fast_rsp_source,
+        fast_rsp_addr,
+        fast_rsp_data,
+        fast_rsp_error
+    } = response_cdc_dst_data;
+
+    cdc_handshake_sync #(
+        .DATA_WIDTH(RESPONSE_CDC_W)
+    ) u_response_handshake (
+        .src_clk   (clk_ctrl),
+        .src_rst_n (rst_ctrl_n),
+        .src_valid (bar_rsp_valid),
+        .src_ready (bar_rsp_ready),
+        .src_data  (response_cdc_src_data),
+        .dst_clk   (clk_uart),
+        .dst_rst_n (rst_uart_n),
+        .dst_valid (fast_rsp_valid),
+        .dst_ready (fast_rsp_ready),
+        .dst_data  (response_cdc_dst_data)
+    );
+
+    cdc_pulse_sync u_soft_reset_sync (
+        .src_clk   (clk_ctrl),
+        .src_rst_n (rst_ctrl_n),
+        .src_pulse (mac_soft_reset_pulse),
+        .dst_clk   (clk_uart),
+        .dst_rst_n (rst_uart_n),
+        .dst_pulse (mac_soft_reset_fast)
+    );
+
+    // Stop the host after accepting an Image Write command until the system
+    // domain has returned the DMA descriptor through the handshake. Without
+    // this guard, the first raw payload bytes could arrive before the fast
+    // deinterleaver has entered payload mode.
+    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
+        if (!rst_uart_n) begin
+            image_write_command_pending <= 1'b0;
+        end
+        else begin
+            if (cmd_valid && cmd_ready &&
+                (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_WRITE)) begin
+                image_write_command_pending <= 1'b1;
+            end
+
+            if (dma_wr_start_fast ||
+                (fast_rsp_valid && fast_rsp_ready && fast_rsp_error)) begin
+                image_write_command_pending <= 1'b0;
+            end
+        end
+    end
+
+    // =========================================================
     // UART RX TOP
     // =========================================================
     uart_rx_top #(
@@ -452,8 +644,10 @@ module chip_top #(
         .rst_n           (rst_uart_n),
 
         .rx              (RX),
-        .soft_reset      (mac_soft_reset_pulse),
-        .frame_collect_enable (!image_payload_active),
+        .soft_reset      (mac_soft_reset_fast),
+        .frame_collect_enable (
+            !image_payload_active && !image_write_command_pending
+        ),
 
         .rx_byte         (uart_rx_byte),
         .rx_byte_valid   (uart_rx_byte_valid),
@@ -475,9 +669,9 @@ module chip_top #(
         .clk            (clk_uart),
         .rst_n          (rst_uart_n),
 
-        .start          (rgf_dma_wr_start),
-        .img_width      (rgf_img_width),
-        .img_height     (rgf_img_height),
+        .start          (dma_wr_start_fast),
+        .img_width      (dma_img_width_fast),
+        .img_height     (dma_img_height_fast),
 
         .rx_byte        (uart_rx_byte),
         .rx_byte_valid  (
@@ -505,9 +699,9 @@ module chip_top #(
         .clk             (clk_uart),
         .rst_n           (rst_uart_n),
 
-        .start           (rgf_dma_rd_start),
-        .img_width       (rgf_img_width),
-        .img_height      (rgf_img_height),
+        .start           (dma_rd_start_fast),
+        .img_width       (dma_img_width_fast),
+        .img_height      (dma_img_height_fast),
 
         .fifo_pop        (dma_tx_pop_fast),
         .fifo_r_data     (dma_tx_r_data_fast),
@@ -572,14 +766,14 @@ module chip_top #(
     // BUS ACCESS ROUTER
     // =========================================================
     bar u_bar (
-        .clk             (clk_uart),
-        .rst_n           (rst_uart_n),
+        .clk             (clk_ctrl),
+        .rst_n           (rst_ctrl_n),
 
-        .cmd_valid       (cmd_valid),
-        .cmd_ready       (cmd_ready),
-        .cmd_opcode      (cmd_opcode),
-        .cmd_addr        (cmd_addr),
-        .cmd_data        (cmd_data),
+        .cmd_valid       (sys_cmd_valid),
+        .cmd_ready       (sys_cmd_ready),
+        .cmd_opcode      (sys_cmd_opcode),
+        .cmd_addr        (sys_cmd_addr),
+        .cmd_data        (sys_cmd_data),
 
         .apb_cmd_valid   (apb_cmd_valid),
         .apb_cmd_ready   (apb_cmd_ready),
@@ -617,8 +811,8 @@ module chip_top #(
     // APB MASTER
     // =========================================================
     apb_master_fsm u_apb_master_fsm (
-        .clk             (clk_uart),
-        .rst_n           (rst_uart_n),
+        .clk             (clk_ctrl),
+        .rst_n           (rst_ctrl_n),
 
         .cmd_valid       (apb_cmd_valid),
         .cmd_ready       (apb_cmd_ready),
@@ -648,8 +842,8 @@ module chip_top #(
         .clk_sys               (clk_ctrl),
         .rst_sys_n             (rst_ctrl_n),
 
-        .dma_wr_start          (rgf_dma_wr_start),
-        .dma_rd_start          (rgf_dma_rd_start),
+        .dma_wr_start          (dma_wr_start_sys),
+        .dma_rd_start          (dma_rd_start_sys),
         .img_base              (rgf_img_base),
         .img_width             (rgf_img_width),
         .img_height            (rgf_img_height),
@@ -681,6 +875,7 @@ module chip_top #(
         .rx_ready_fast         (dma_rx_ready_fast),
         .rx_almost_full_fast   (dma_rx_almost_full_fast),
         .rx_overflow_fast      (dma_rx_overflow_fast),
+        .rx_level_fast         (dma_rx_level_fast),
 
         .tx_pop_fast           (dma_tx_pop_fast),
         .tx_ae_level_fast      (dma_tx_ae_level_fast),
@@ -690,11 +885,14 @@ module chip_top #(
         .tx_data_valid_fast    (dma_tx_data_valid_fast),
         .tx_empty_fast         (dma_tx_empty_fast),
         .tx_underflow_fast     (dma_tx_underflow_fast),
+        .tx_level_fast         (dma_tx_level_fast),
 
         .rx_ae_level_sys       (dma_rx_ae_level_sys),
         .tx_af_free_level_sys  (dma_tx_af_free_level_sys),
         .rx_underflow_sys      (dma_rx_underflow_sys),
-        .tx_overflow_sys       (dma_tx_overflow_sys)
+        .tx_overflow_sys       (dma_tx_overflow_sys),
+        .rx_level_sys          (dma_rx_level_sys),
+        .tx_level_sys          (dma_tx_level_sys)
     );
 
 
@@ -706,8 +904,8 @@ module chip_top #(
         .DATA_WIDTH (lab12_pkg::APB_DATA_WIDTH),
         .FIFO_DEPTH (FIFO_DEPTH)
     ) u_apb_rgf_slave (
-        .clk                  (clk_uart),
-        .rst_n                (rst_uart_n),
+        .clk                  (clk_ctrl),
+        .rst_n                (rst_ctrl_n),
 
         .apb                  (rgf_apb_if),
 
@@ -722,18 +920,18 @@ module chip_top #(
 
         .dma_busy             (dma_busy),
         .dma_done             (dma_done),
-        .dma_error            (dma_error),
+        .dma_error            (dma_error_status_sys),
 
         .wr_row_cnt           (dma_wr_row_cnt),
         .wr_col_cnt           (dma_wr_col_cnt),
         .rd_row_cnt           (dma_rd_row_cnt),
         .rd_col_cnt           (dma_rd_col_cnt),
-        .fifo_empty           (fifo_empty),
-        .fifo_full            (fifo_full),
+        .fifo_empty           (dma_tx_empty_sys),
+        .fifo_full            (dma_rx_full_sys),
         .fifo_error           (fifo_error),
 
-        .uart_parity_err      (rx_parity_err),
-        .uart_framing_err     (rx_framing_err),
+        .uart_parity_err      (fast_status_event_sys[0]),
+        .uart_framing_err     (fast_status_event_sys[1]),
 
         .clk_sel              (clk_sel),
         .parity_enable        (parity_enable_dbg),
@@ -753,12 +951,12 @@ module chip_top #(
         .clk            (clk_uart),
         .rst_n          (rst_uart_n),
 
-        .rsp_valid      (bar_rsp_valid),
-        .rsp_ready      (bar_rsp_ready),
-        .rsp_source     (bar_rsp_source),
-        .rsp_addr       (bar_rsp_addr),
-        .rsp_data       (bar_rsp_data),
-        .rsp_error      (bar_rsp_error),
+        .rsp_valid      (fast_rsp_valid),
+        .rsp_ready      (fast_rsp_ready),
+        .rsp_source     (fast_rsp_source),
+        .rsp_addr       (fast_rsp_addr),
+        .rsp_data       (fast_rsp_data),
+        .rsp_error      (fast_rsp_error),
 
         .packet_valid   (control_packet_valid),
         .packet_data    (control_packet_data),
@@ -803,6 +1001,68 @@ module chip_top #(
     );
 
     // =========================================================
+    // FAST STATUS -> SYSTEM STATUS CDC
+    // =========================================================
+    // Error events accumulate while the status handshake is busy. This avoids
+    // both a direct pulse crossing and a permanently asserted sticky input.
+    assign fast_status_event = {
+        dma_rx_overflow_fast  |
+        dma_tx_underflow_fast |
+        image_payload_error   |
+        burst_tx_error        |
+        control_response_error,
+        rx_framing_err,
+        rx_parity_err
+    };
+
+    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
+        if (!rst_uart_n) begin
+            fast_status_pending <= 3'b000;
+        end
+        else begin
+            if ((|fast_status_pending) && fast_status_src_ready)
+                fast_status_pending <= fast_status_event;
+            else
+                fast_status_pending <=
+                    fast_status_pending | fast_status_event;
+        end
+    end
+
+    cdc_handshake_sync #(
+        .DATA_WIDTH(3)
+    ) u_status_event_handshake (
+        .src_clk   (clk_uart),
+        .src_rst_n (rst_uart_n),
+        .src_valid (|fast_status_pending),
+        .src_ready (fast_status_src_ready),
+        .src_data  (fast_status_pending),
+        .dst_clk   (clk_ctrl),
+        .dst_rst_n (rst_ctrl_n),
+        .dst_valid (fast_status_dst_valid),
+        .dst_ready (1'b1),
+        .dst_data  (fast_status_dst_data)
+    );
+
+    assign fast_status_event_sys =
+        fast_status_dst_data & {3{fast_status_dst_valid}};
+
+    cdc_2ff_sync #(
+        .RESET_VALUE(1'b1)
+    ) u_tx_empty_2ff (
+        .clk      (clk_ctrl),
+        .rst_n    (rst_ctrl_n),
+        .async_in (dma_tx_empty_fast),
+        .sync_out (dma_tx_empty_sys)
+    );
+
+    cdc_2ff_sync u_rx_full_2ff (
+        .clk      (clk_ctrl),
+        .rst_n    (rst_ctrl_n),
+        .async_in (!dma_rx_ready_fast),
+        .sync_out (dma_rx_full_sys)
+    );
+
+    // =========================================================
     // DEBUG ASSIGNMENTS
     // =========================================================
     // Legacy top-level debug ports are mapped to the final-project
@@ -812,19 +1072,18 @@ module chip_top #(
     assign seq_busy          = dma_busy;
     assign composer_busy     = burst_tx_active;
 
-    assign fifo_level        = '0;
+    assign fifo_level        = dma_rx_level_fast;
     assign fifo_empty        = dma_tx_empty_fast;
-    assign fifo_almost_empty = dma_tx_empty_fast;
-    assign fifo_half_full    = 1'b0;
+    assign fifo_almost_empty =
+        (dma_tx_level_fast <= dma_tx_ae_level_fast);
+    assign fifo_half_full    =
+        (dma_rx_level_fast >= FIFO_LEVEL_W'(FIFO_DEPTH / 2));
     assign fifo_almost_full  = dma_rx_almost_full_fast;
     assign fifo_full         = !dma_rx_ready_fast;
     assign fifo_error        =
-        dma_rx_overflow_fast  |
         dma_rx_underflow_sys  |
         dma_tx_overflow_sys   |
-        dma_tx_underflow_fast |
-        image_payload_error   |
-        burst_tx_error;
+        fast_status_event_sys[2];
 
     assign seq_row_cnt = dma_wr_row_cnt[9:0];
     assign seq_col_cnt = dma_wr_col_cnt[9:0];
@@ -832,7 +1091,8 @@ module chip_top #(
     assign tx_col_cnt  = dma_rd_col_cnt[lab12_pkg::COL_WIDTH-1:0];
 
     // RTS is active-low at board level: 0 means the FPGA can receive.
-    assign rts = image_payload_active && !image_payload_ready;
+    assign rts = image_write_command_pending ||
+                 (image_payload_active && !image_payload_ready);
     assign rx_parse_error =
         parse_error;
 
@@ -843,7 +1103,7 @@ module chip_top #(
         rgf_error_int |
         apb_error_pulse |
         ahb_error_pulse |
-        control_response_error |
+        dma_cfg_missed |
         fifo_error;
 
     assign rx_parity_error_dbg =

@@ -105,7 +105,7 @@ module async_fifo #(
 
     assign wr_level_next_ext = wbin_next - rbin_sync_w;
     assign rd_level_next_ext = wbin_sync_r - rbin_next;
-    assign wr_free_next_ext = DEPTH - wr_level_next_ext;
+    assign wr_free_next_ext = PTR_W'(DEPTH) - wr_level_next_ext;
 
     assign wr_full_next =
         (wgray_next == {~rgray_wq2[PTR_W-1:PTR_W-2], rgray_wq2[PTR_W-3:0]});

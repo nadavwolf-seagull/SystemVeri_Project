@@ -21,6 +21,7 @@ module final_project_memory_cluster #(
     output logic                  rx_ready_fast,
     output logic                  rx_almost_full_fast,
     output logic                  rx_overflow_fast,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] rx_level_fast,
 
     // System RX consumer: DMA pops one color at a time.
     input  logic [2:0]            rx_pop_sys,
@@ -31,6 +32,7 @@ module final_project_memory_cluster #(
     output logic [2:0]            rx_data_valid_sys,
     output logic [2:0]            rx_empty_sys,
     output logic                  rx_underflow_sys,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] rx_level_sys,
 
     // System TX producer: DMA pushes one color at a time.
     input  logic [2:0]            tx_push_sys,
@@ -41,6 +43,7 @@ module final_project_memory_cluster #(
     output logic [2:0]            tx_ready_sys,
     output logic [2:0]            tx_almost_full_sys,
     output logic                  tx_overflow_sys,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] tx_level_sys,
 
     // Fast TX consumer: packer reads an aligned RGB triple.
     input  logic                  tx_pop_fast,
@@ -50,8 +53,11 @@ module final_project_memory_cluster #(
     output logic [FIFO_WIDTH-1:0] tx_b_data_fast,
     output logic                  tx_data_valid_fast,
     output logic                  tx_empty_fast,
-    output logic                  tx_underflow_fast
+    output logic                  tx_underflow_fast,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] tx_level_fast
 );
+
+    localparam int unsigned LEVEL_W = $clog2(FIFO_DEPTH + 1);
 
     logic [2:0] rx_wr_push;
     logic [2:0] rx_wr_ready;
@@ -69,18 +75,34 @@ module final_project_memory_cluster #(
     logic [2:0] tx_rd_almost_empty;
     logic [2:0] tx_rd_underflow;
 
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_wr_level_r;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_wr_level_g;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_wr_level_b;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_rd_level_r;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_rd_level_g;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_rx_rd_level_b;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_wr_level_r;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_wr_level_g;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_wr_level_b;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_rd_level_r;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_rd_level_g;
-    logic [$clog2(FIFO_DEPTH+1)-1:0] unused_tx_rd_level_b;
+    logic [LEVEL_W-1:0] rx_wr_level_r, rx_wr_level_g, rx_wr_level_b;
+    logic [LEVEL_W-1:0] rx_rd_level_r, rx_rd_level_g, rx_rd_level_b;
+    logic [LEVEL_W-1:0] tx_wr_level_r, tx_wr_level_g, tx_wr_level_b;
+    logic [LEVEL_W-1:0] tx_rd_level_r, tx_rd_level_g, tx_rd_level_b;
+
+    function automatic logic [LEVEL_W-1:0] max3(
+        input logic [LEVEL_W-1:0] a,
+        input logic [LEVEL_W-1:0] b,
+        input logic [LEVEL_W-1:0] c
+    );
+        logic [LEVEL_W-1:0] ab_max;
+        begin
+            ab_max = (a >= b) ? a : b;
+            max3   = (ab_max >= c) ? ab_max : c;
+        end
+    endfunction
+
+    function automatic logic [LEVEL_W-1:0] min3(
+        input logic [LEVEL_W-1:0] a,
+        input logic [LEVEL_W-1:0] b,
+        input logic [LEVEL_W-1:0] c
+    );
+        logic [LEVEL_W-1:0] ab_min;
+        begin
+            ab_min = (a <= b) ? a : b;
+            min3   = (ab_min <= c) ? ab_min : c;
+        end
+    endfunction
 
     assign rx_ready_fast       = &rx_wr_ready;
     assign rx_almost_full_fast = |rx_wr_almost_full;
@@ -89,12 +111,20 @@ module final_project_memory_cluster #(
                                   (|rx_wr_overflow);
     assign rx_underflow_sys     = |rx_rd_underflow;
 
+    // RX fast/system levels summarize the most constrained view in each
+    // domain. Maximum write occupancy is conservative for backpressure;
+    // minimum read occupancy counts complete RGB groups available to DMA.
+    assign rx_level_fast = max3(rx_wr_level_r, rx_wr_level_g, rx_wr_level_b);
+    assign rx_level_sys  = min3(rx_rd_level_r, rx_rd_level_g, rx_rd_level_b);
+
     assign tx_empty_fast        = |tx_rd_empty;
     assign tx_rd_pop            = {3{tx_pop_fast && !tx_empty_fast}};
     assign tx_data_valid_fast   = &tx_rd_valid;
     assign tx_underflow_fast    = (tx_pop_fast && tx_empty_fast) |
                                   (|tx_rd_underflow);
     assign tx_overflow_sys      = |tx_wr_overflow;
+    assign tx_level_sys  = max3(tx_wr_level_r, tx_wr_level_g, tx_wr_level_b);
+    assign tx_level_fast = min3(tx_rd_level_r, tx_rd_level_g, tx_rd_level_b);
 
     rgb_async_fifo_bank #(
         .DATA_WIDTH(FIFO_WIDTH),
@@ -110,9 +140,9 @@ module final_project_memory_cluster #(
         .wr_ready          (rx_wr_ready),
         .wr_full           (rx_wr_full),
         .wr_almost_full    (rx_wr_almost_full),
-        .wr_level_r        (unused_rx_wr_level_r),
-        .wr_level_g        (unused_rx_wr_level_g),
-        .wr_level_b        (unused_rx_wr_level_b),
+        .wr_level_r        (rx_wr_level_r),
+        .wr_level_g        (rx_wr_level_g),
+        .wr_level_b        (rx_wr_level_b),
         .wr_overflow       (rx_wr_overflow),
         .rd_clk            (ahb.HCLK),
         .rd_rst_n          (ahb.HRESETn),
@@ -124,9 +154,9 @@ module final_project_memory_cluster #(
         .rd_data_valid     (rx_data_valid_sys),
         .rd_empty          (rx_empty_sys),
         .rd_almost_empty   (rx_rd_almost_empty),
-        .rd_level_r        (unused_rx_rd_level_r),
-        .rd_level_g        (unused_rx_rd_level_g),
-        .rd_level_b        (unused_rx_rd_level_b),
+        .rd_level_r        (rx_rd_level_r),
+        .rd_level_g        (rx_rd_level_g),
+        .rd_level_b        (rx_rd_level_b),
         .rd_underflow      (rx_rd_underflow)
     );
 
@@ -144,9 +174,9 @@ module final_project_memory_cluster #(
         .wr_ready          (tx_ready_sys),
         .wr_full           (tx_wr_full),
         .wr_almost_full    (tx_almost_full_sys),
-        .wr_level_r        (unused_tx_wr_level_r),
-        .wr_level_g        (unused_tx_wr_level_g),
-        .wr_level_b        (unused_tx_wr_level_b),
+        .wr_level_r        (tx_wr_level_r),
+        .wr_level_g        (tx_wr_level_g),
+        .wr_level_b        (tx_wr_level_b),
         .wr_overflow       (tx_wr_overflow),
         .rd_clk            (clk_fast),
         .rd_rst_n          (rst_fast_n),
@@ -158,9 +188,9 @@ module final_project_memory_cluster #(
         .rd_data_valid     (tx_rd_valid),
         .rd_empty          (tx_rd_empty),
         .rd_almost_empty   (tx_rd_almost_empty),
-        .rd_level_r        (unused_tx_rd_level_r),
-        .rd_level_g        (unused_tx_rd_level_g),
-        .rd_level_b        (unused_tx_rd_level_b),
+        .rd_level_r        (tx_rd_level_r),
+        .rd_level_g        (tx_rd_level_g),
+        .rd_level_b        (tx_rd_level_b),
         .rd_underflow      (tx_rd_underflow)
     );
 
