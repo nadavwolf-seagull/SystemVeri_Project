@@ -1,0 +1,116 @@
+# ============================================================
+# Shahar Verification Makefile
+# Usage examples:
+#
+# make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver
+# make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver lint
+# make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver clean
+# ============================================================
+
+TOP       ?= tb_image_burst_rx_deinterleaver
+
+RTL_DIR   := $(abspath ..)
+TB_DIR    := $(CURDIR)
+TB_FILE   := $(TB_DIR)/$(TOP).sv
+
+OBJ_ROOT  := $(TB_DIR)/obj_dir_shahar
+OBJ_DIR   := $(OBJ_ROOT)/$(TOP)
+
+VERILATOR := verilator
+
+# Avoid dependence on TAB characters in Makefile recipes.
+.RECIPEPREFIX := >
+
+# ============================================================
+# RTL source selection per testbench
+# ============================================================
+
+ifeq ($(TOP),tb_image_burst_rx_deinterleaver)
+
+RTL_SRCS := \
+    $(RTL_DIR)/image_burst_rx_deinterleaver.sv
+
+else ifeq ($(TOP),tb_image_burst_tx_packer)
+
+RTL_SRCS := \
+    $(RTL_DIR)/lab12_pkg.sv \
+    $(RTL_DIR)/image_burst_tx_packer.sv
+
+else ifeq ($(TOP),tb_seq_img_cluster)
+
+RTL_SRCS := \
+    $(RTL_DIR)/rgb_sram_subsystem.sv \
+    $(RTL_DIR)/sequencer.sv \
+    $(RTL_DIR)/fifo_controller.sv \
+    $(RTL_DIR)/ram_1r1w.sv \
+    $(RTL_DIR)/seq_tx_img_fifo.sv \
+    $(RTL_DIR)/ahb_pixel_slave.sv \
+    $(RTL_DIR)/seq_img_cluster.sv
+
+else ifeq ($(TOP),tb_ahb_pixel_slave)
+
+RTL_SRCS := \
+    $(RTL_DIR)/rgb_sram_subsystem.sv \
+    $(RTL_DIR)/ahb_pixel_slave.sv
+
+else
+
+$(error Unsupported TOP="$(TOP)")
+
+endif
+
+# ============================================================
+# Verilator options
+# ============================================================
+
+VERILATOR_BUILD_FLAGS := \
+    --binary \
+    --timing \
+    --trace \
+    --assert \
+    -Wall \
+    -Wno-fatal \
+    --top-module $(TOP) \
+    --Mdir $(OBJ_DIR)
+
+VERILATOR_LINT_FLAGS := \
+    --lint-only \
+    --timing \
+    --assert \
+    -Wall \
+    -Wno-fatal \
+    --top-module $(TOP)
+
+# ============================================================
+# Targets
+# ============================================================
+
+.PHONY: all build sim lint clean clean-all
+
+all: sim
+
+build:
+>mkdir -p $(OBJ_DIR)
+>$(VERILATOR) \
+>    $(VERILATOR_BUILD_FLAGS) \
+>    $(RTL_SRCS) \
+>    $(TB_FILE)
+
+sim: build
+>cd $(RTL_DIR) && $(OBJ_DIR)/V$(TOP)
+
+lint:
+>$(VERILATOR) \
+>    $(VERILATOR_LINT_FLAGS) \
+>    $(RTL_SRCS) \
+>    $(TB_FILE)
+
+clean:
+>rm -rf $(OBJ_DIR)
+>rm -f $(TB_DIR)/$(TOP).vcd
+>rm -f $(TB_DIR)/$(TOP).fst
+
+clean-all:
+>rm -rf $(OBJ_ROOT)
+>rm -f $(TB_DIR)/*.vcd
+>rm -f $(TB_DIR)/*.fst
