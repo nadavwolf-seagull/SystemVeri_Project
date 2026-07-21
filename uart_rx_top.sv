@@ -16,6 +16,7 @@ module uart_rx_top #(
 
     input logic rx,
     input logic soft_reset,
+    input logic frame_collect_enable,
 
     // Byte-level PHY outputs
     output logic [7:0] rx_byte,
@@ -68,10 +69,15 @@ module uart_rx_top #(
         .rst_n         (rst_n),
 
         .rx_byte       (rx_byte),
-        .rx_byte_valid (rx_byte_valid),
+        .rx_byte_valid (
+            rx_byte_valid &&
+            frame_collect_enable
+        ),
         .framing_err   (phy_error),
-        .soft_reset    (soft_reset),
-
+        .soft_reset    (
+            soft_reset ||
+            !frame_collect_enable
+        ),
         .frame_data    (frame_data),
         .frame_len     (frame_len),
         .frame_valid   (frame_valid),

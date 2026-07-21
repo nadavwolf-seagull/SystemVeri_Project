@@ -2,8 +2,14 @@ timeunit 1ns;
 timeprecision 1ps;
 
 module uart_tx_top #(
-    parameter int unsigned PACKET_BYTES = lab12_pkg::TX_PACKET_BYTES,
-    parameter int unsigned PACKET_WIDTH = lab12_pkg::TX_PACKET_WIDTH,
+    parameter int unsigned MAX_PACKET_BYTES =
+        lab12_pkg::UART_TX_MAX_PACKET_BYTES,
+
+    parameter int unsigned MAX_PACKET_WIDTH =
+        lab12_pkg::UART_TX_MAX_PACKET_WIDTH,
+
+    parameter int unsigned PACKET_LEN_WIDTH =
+        lab12_pkg::UART_TX_PACKET_LEN_WIDTH,
     parameter int unsigned CLKS_PER_BIT = lab12_pkg::UART_CLKS_PER_BIT,
     parameter logic        PARITY_EN    = lab12_pkg::UART_PARITY_EN,
     parameter logic        EVEN_PARITY  = lab12_pkg::UART_EVEN_PARITY
@@ -19,9 +25,10 @@ module uart_tx_top #(
     input  logic                    cts_n,
 
     // Packet-level interface from Message Composer
-    input  logic                    packet_valid,
-    input  logic [PACKET_WIDTH-1:0] packet_data,
-    output logic                    packet_ready,
+    input  logic                        packet_valid,
+    input  logic [MAX_PACKET_WIDTH-1:0] packet_data,
+    input  logic [PACKET_LEN_WIDTH-1:0] packet_len,
+    output logic                        packet_ready,
 
     // Packet status
     output logic                    packet_busy,
@@ -42,8 +49,9 @@ module uart_tx_top #(
     // UART TX MAC
     // ------------------------------------------------------------
     uart_tx_mac #(
-        .PACKET_BYTES (PACKET_BYTES),
-        .PACKET_WIDTH (PACKET_WIDTH)
+        .MAX_PACKET_BYTES (MAX_PACKET_BYTES),
+        .MAX_PACKET_WIDTH (MAX_PACKET_WIDTH),
+        .PACKET_LEN_WIDTH (PACKET_LEN_WIDTH)
     ) u_uart_tx_mac (
         .sys_clk      (sys_clk),
         .rst_n        (rst_n),
@@ -53,6 +61,7 @@ module uart_tx_top #(
 
         .packet_valid (packet_valid),
         .packet_data  (packet_data),
+        .packet_len    (packet_len),
         .packet_ready (packet_ready),
 
         .uart_done    (uart_done),

@@ -18,14 +18,26 @@ module config_rgf #(
     output logic                  rd_valid,
     output logic                  error,
 
-    // Selected register outputs toward the system
+    // DMA configuration and control outputs
     output logic                  image_start_pulse,
+    output logic                  dma_wr_start,
+    output logic                  dma_rd_start,
+    output logic [23:0]           img_base,
+    output logic [15:0]           img_width,
+    output logic [15:0]           img_height,
+
     output logic [DATA_WIDTH-1:0] fifo_ae_level,
     output logic [DATA_WIDTH-1:0] fifo_af_level,
 
     // Status inputs from the system
-    input  logic                  seq_busy,
-    input  logic                  image_done,
+    input logic                   dma_busy,
+    input logic                   dma_done,
+    input logic                   dma_error,
+
+    input logic [15:0]            wr_row_cnt,
+    input logic [15:0]            wr_col_cnt,
+    input logic [15:0]            rd_row_cnt,
+    input logic [15:0]            rd_col_cnt,
     input  logic                  fifo_empty,
     input  logic                  fifo_full,
     input  logic                  fifo_error,
@@ -44,6 +56,9 @@ module config_rgf #(
     // Internal registers
     // ============================================================
     logic [DATA_WIDTH-1:0] ctrl_reg;
+    logic [DATA_WIDTH-1:0] img_base_reg;
+    logic [DATA_WIDTH-1:0] img_width_reg;
+    logic [DATA_WIDTH-1:0] img_height_reg;
     logic [DATA_WIDTH-1:0] fifo_ae_level_reg;
     logic [DATA_WIDTH-1:0] fifo_af_level_reg;
     logic [DATA_WIDTH-1:0] error_status_reg;
@@ -66,8 +81,11 @@ module config_rgf #(
     always_comb begin
         status_value = '0;
 
-        status_value[lab12_pkg::RGF_STATUS_SEQ_BUSY_BIT]   = seq_busy;
-        status_value[lab12_pkg::RGF_STATUS_IMAGE_DONE_BIT] = image_done;
+        status_value[lab12_pkg::RGF_STATUS_SEQ_BUSY_BIT] =
+            dma_busy;
+
+        status_value[lab12_pkg::RGF_STATUS_IMAGE_DONE_BIT] =
+            dma_done;
         status_value[lab12_pkg::RGF_STATUS_FIFO_EMPTY_BIT] = fifo_empty;
         status_value[lab12_pkg::RGF_STATUS_FIFO_FULL_BIT]  = fifo_full;
         status_value[lab12_pkg::RGF_STATUS_FIFO_ERROR_BIT] = fifo_error;
@@ -91,6 +109,11 @@ module config_rgf #(
             lab12_pkg::RGF_ADDR_FIFO_AF_LEVEL,
             lab12_pkg::RGF_ADDR_ERROR_STATUS,
             lab12_pkg::RGF_ADDR_VERSION,
+            lab12_pkg::RGF_ADDR_IMG_BASE,
+            lab12_pkg::RGF_ADDR_WR_ROW_CNT,
+            lab12_pkg::RGF_ADDR_WR_COL_CNT,
+            lab12_pkg::RGF_ADDR_RD_ROW_CNT,
+            lab12_pkg::RGF_ADDR_RD_COL_CNT,
             lab12_pkg::RGF_ADDR_UART_ERROR_CNT: begin
                 illegal_addr = 1'b0;
             end
@@ -112,6 +135,9 @@ module config_rgf #(
             unique case (addr)
 
                 lab12_pkg::RGF_ADDR_CTRL,
+                lab12_pkg::RGF_ADDR_IMG_BASE,
+                lab12_pkg::RGF_ADDR_IMG_WIDTH,
+                lab12_pkg::RGF_ADDR_IMG_HEIGHT,
                 lab12_pkg::RGF_ADDR_FIFO_AE_LEVEL,
                 lab12_pkg::RGF_ADDR_FIFO_AF_LEVEL: begin
                     illegal_write = 1'b0;
@@ -152,22 +178,38 @@ module config_rgf #(
     // ============================================================
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            ctrl_reg             <= '0;
-            fifo_ae_level_reg    <= DATA_WIDTH'(lab12_pkg::FIFO_AE_LEVEL);
-            fifo_af_level_reg    <= DATA_WIDTH'(lab12_pkg::FIFO_AF_LEVEL);
-            error_status_reg     <= '0;
-            uart_error_cnt_reg   <= '0;
-            image_start_pulse    <= 1'b0;
+            ctrl_reg           <= '0;
+
+            img_base_reg       <= DATA_WIDTH'(lab12_pkg::R_SRAM_BASE_ADDR);
+            img_width_reg      <= DATA_WIDTH'(lab12_pkg::IMG_WIDTH);
+            img_height_reg     <= DATA_WIDTH'(lab12_pkg::IMG_HEIGHT);
+
+            fifo_ae_level_reg  <= DATA_WIDTH'(lab12_pkg::FIFO_AE_LEVEL);
+            fifo_af_level_reg  <= DATA_WIDTH'(lab12_pkg::FIFO_AF_LEVEL);
+            error_status_reg   <= '0;
+            uart_error_cnt_reg <= '0;
+
+            dma_wr_start       <= 1'b0;
+            dma_rd_start       <= 1'b0;
+            image_start_pulse  <= 1'b0;
+
             mac_soft_reset_pulse <= 1'b0;
         end
         else begin
             // Default: start pulse is one clock only
+            dma_wr_start      <= 1'b0;
+            dma_rd_start      <= 1'b0;
             image_start_pulse <= 1'b0;
             mac_soft_reset_pulse <= 1'b0;
 
             // Latch external FIFO error into ERROR_STATUS
             if (fifo_error) begin
                 error_status_reg[lab12_pkg::RGF_ERROR_FIFO_ERROR_BIT] <= 1'b1;
+            end
+
+            // Latch DMA error into ERROR_STATUS
+            if (dma_error) begin
+                error_status_reg[lab12_pkg::RGF_ERROR_DMA_ERROR_BIT] <= 1'b1;
             end
 
             // LAB11: latch UART PHY errors and count faulty frames
@@ -200,11 +242,26 @@ module config_rgf #(
                         lab12_pkg::RGF_ADDR_CTRL: begin
                             ctrl_reg <= wr_data;
 
-                            // Option B:
-                            // Writing 1 to CTRL[0] creates a one-cycle image_start_pulse.
-                            if (wr_data[lab12_pkg::RGF_CTRL_IMAGE_START_BIT]) begin
+                            if (wr_data[lab12_pkg::RGF_CTRL_DMA_RD_START_BIT]) begin
+                                dma_rd_start      <= 1'b1;
                                 image_start_pulse <= 1'b1;
                             end
+
+                            if (wr_data[lab12_pkg::RGF_CTRL_DMA_WR_START_BIT]) begin
+                                dma_wr_start <= 1'b1;
+                            end
+                        end
+
+                        lab12_pkg::RGF_ADDR_IMG_BASE: begin
+                            img_base_reg <= wr_data;
+                        end
+
+                        lab12_pkg::RGF_ADDR_IMG_WIDTH: begin
+                            img_width_reg <= wr_data;
+                        end
+
+                        lab12_pkg::RGF_ADDR_IMG_HEIGHT: begin
+                            img_height_reg <= wr_data;
                         end
 
                         lab12_pkg::RGF_ADDR_FIFO_AE_LEVEL: begin
@@ -267,12 +324,32 @@ module config_rgf #(
                             rd_data <= status_value;
                         end
 
+                        lab12_pkg::RGF_ADDR_IMG_BASE: begin
+                            rd_data <= img_base_reg;
+                        end
+
                         lab12_pkg::RGF_ADDR_IMG_WIDTH: begin
-                            rd_data <= DATA_WIDTH'(lab12_pkg::IMG_WIDTH);
+                            rd_data <= img_width_reg;
                         end
 
                         lab12_pkg::RGF_ADDR_IMG_HEIGHT: begin
-                            rd_data <= DATA_WIDTH'(lab12_pkg::IMG_HEIGHT);
+                            rd_data <= img_height_reg;
+                        end
+
+                        lab12_pkg::RGF_ADDR_WR_ROW_CNT: begin
+                            rd_data <= DATA_WIDTH'(wr_row_cnt);
+                        end
+
+                        lab12_pkg::RGF_ADDR_WR_COL_CNT: begin
+                            rd_data <= DATA_WIDTH'(wr_col_cnt);
+                        end
+
+                        lab12_pkg::RGF_ADDR_RD_ROW_CNT: begin
+                            rd_data <= DATA_WIDTH'(rd_row_cnt);
+                        end
+
+                        lab12_pkg::RGF_ADDR_RD_COL_CNT: begin
+                            rd_data <= DATA_WIDTH'(rd_col_cnt);
                         end
 
                         lab12_pkg::RGF_ADDR_FIFO_AE_LEVEL: begin
@@ -314,5 +391,8 @@ module config_rgf #(
     assign fifo_af_level = fifo_af_level_reg;
     assign clk_sel       = ctrl_reg[lab12_pkg::RGF_CTRL_CLK_SEL_BIT];
     assign parity_enable = ctrl_reg[lab12_pkg::RGF_CTRL_PARITY_ENABLE_BIT];
+    assign img_base   = img_base_reg[23:0];
+    assign img_width  = img_width_reg[15:0];
+    assign img_height = img_height_reg[15:0];
 
 endmodule
