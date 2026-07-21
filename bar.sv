@@ -61,18 +61,23 @@ module bar (
     output logic                              rsp_error
 );
 
-    typedef enum logic [2:0] {
+    typedef enum logic [3:0] {
         BAR_IDLE,
         BAR_WAIT_APB_WRITE,
         BAR_WAIT_APB_READ,
         BAR_WAIT_AHB_WRITE,
         BAR_WAIT_AHB_READ,
+        BAR_IMG_SEND,
+        BAR_IMG_WAIT,
         BAR_RSP_HOLD
     } bar_state_t;
 
     bar_state_t state;
 
     logic [lab12_pkg::CMD_ADDR_WIDTH-1:0] saved_addr;
+    logic [lab12_pkg::CMD_DATA_WIDTH-1:0] saved_data;
+    lab12_pkg::rx_cmd_opcode_t saved_image_opcode;
+    logic [1:0] image_step;
 
     // ============================================================
     // Command routing
@@ -97,8 +102,7 @@ module bar (
             unique case (cmd_opcode)
 
                 lab12_pkg::RX_CMD_RGF_WRITE,
-                lab12_pkg::RX_CMD_RGF_READ,
-                lab12_pkg::RX_CMD_IMAGE_READ: begin
+                lab12_pkg::RX_CMD_RGF_READ: begin
                     cmd_ready = apb_cmd_ready;
 
                     apb_cmd_valid  = cmd_valid;
@@ -107,6 +111,13 @@ module bar (
                         cmd_addr[lab12_pkg::RGF_ADDR_WIDTH-1:0];
                     apb_cmd_data   =
                         cmd_data[lab12_pkg::RGF_DATA_WIDTH-1:0];
+                end
+
+                lab12_pkg::RX_CMD_IMAGE_READ,
+                lab12_pkg::RX_CMD_IMAGE_WRITE: begin
+                    // Capture the complete image command first.
+                    // The four APB operations are issued afterward.
+                    cmd_ready = 1'b1;
                 end
 
                 lab12_pkg::RX_CMD_PIXEL_WRITE,
@@ -131,6 +142,60 @@ module bar (
             endcase
         end
 
+        if (state == BAR_IMG_SEND) begin
+            apb_cmd_valid = 1'b1;
+
+            unique case (image_step)
+
+                2'd0: begin
+                    // Configure image base address.
+                    apb_cmd_opcode = lab12_pkg::RX_CMD_RGF_WRITE;
+                    apb_cmd_addr   = lab12_pkg::RGF_ADDR_IMG_BASE;
+                    apb_cmd_data   = {
+                        {(lab12_pkg::RGF_DATA_WIDTH-
+                        lab12_pkg::CMD_ADDR_WIDTH){1'b0}},
+                        saved_addr
+                    };
+                end
+
+                2'd1: begin
+                    // Configure image width.
+                    apb_cmd_opcode = lab12_pkg::RX_CMD_RGF_WRITE;
+                    apb_cmd_addr   = lab12_pkg::RGF_ADDR_IMG_WIDTH;
+                    apb_cmd_data   = {
+                        {(lab12_pkg::RGF_DATA_WIDTH-16){1'b0}},
+                        saved_data[15:0]
+                    };
+                end
+
+                2'd2: begin
+                    // Configure image height.
+                    apb_cmd_opcode = lab12_pkg::RX_CMD_RGF_WRITE;
+                    apb_cmd_addr   = lab12_pkg::RGF_ADDR_IMG_HEIGHT;
+                    apb_cmd_data   = {
+                        {(lab12_pkg::RGF_DATA_WIDTH-16){1'b0}},
+                        saved_data[31:16]
+                    };
+                end
+
+                2'd3: begin
+                    // The APB master performs the CTRL read-modify-write
+                    // and selects the correct DMA start bit by opcode.
+                    apb_cmd_opcode = saved_image_opcode;
+                    apb_cmd_addr   = lab12_pkg::RGF_ADDR_CTRL;
+                    apb_cmd_data   = '0;
+                end
+
+                default: begin
+                    apb_cmd_valid  = 1'b0;
+                    apb_cmd_opcode = lab12_pkg::RX_CMD_NOP;
+                    apb_cmd_addr   = '0;
+                    apb_cmd_data   = '0;
+                end
+
+            endcase
+        end
+
         if (state == BAR_WAIT_APB_READ) begin
             apb_rsp_ready = 1'b1;
         end
@@ -147,6 +212,9 @@ module bar (
         if (!rst_n) begin
             state      <= BAR_IDLE;
             saved_addr <= '0;
+            saved_data         <= '0;
+            saved_image_opcode <= lab12_pkg::RX_CMD_NOP;
+            image_step         <= 2'd0;
 
             rsp_valid  <= 1'b0;
             rsp_source <= lab12_pkg::BAR_TARGET_NONE;
@@ -169,13 +237,21 @@ module bar (
 
                         unique case (cmd_opcode)
 
-                            lab12_pkg::RX_CMD_RGF_WRITE,
-                            lab12_pkg::RX_CMD_IMAGE_READ: begin
+                            lab12_pkg::RX_CMD_RGF_WRITE: begin
                                 state <= BAR_WAIT_APB_WRITE;
                             end
 
                             lab12_pkg::RX_CMD_RGF_READ: begin
                                 state <= BAR_WAIT_APB_READ;
+                            end
+
+                            lab12_pkg::RX_CMD_IMAGE_READ,
+                            lab12_pkg::RX_CMD_IMAGE_WRITE: begin
+                                saved_addr         <= cmd_addr;
+                                saved_data         <= cmd_data;
+                                saved_image_opcode <= cmd_opcode;
+                                image_step         <= 2'd0;
+                                state              <= BAR_IMG_SEND;
                             end
 
                             lab12_pkg::RX_CMD_PIXEL_WRITE: begin
@@ -234,6 +310,29 @@ module bar (
                         rsp_data   <= ahb_rsp_data;
                         rsp_error  <= ahb_rsp_error;
                         state      <= BAR_RSP_HOLD;
+                    end
+                end
+
+                BAR_IMG_SEND: begin
+                    if (apb_cmd_valid && apb_cmd_ready) begin
+                        state <= BAR_IMG_WAIT;
+                    end
+                end
+
+                BAR_IMG_WAIT: begin
+                    // cmd_ready returns high when the APB master has completed
+                    // the current transaction and returned to its idle state.
+                    if (apb_cmd_ready) begin
+                        if (image_step == 2'd3) begin
+                            saved_data         <= '0;
+                            saved_image_opcode <= lab12_pkg::RX_CMD_NOP;
+                            image_step         <= 2'd0;
+                            state              <= BAR_IDLE;
+                        end
+                        else begin
+                            image_step <= image_step + 2'd1;
+                            state      <= BAR_IMG_SEND;
+                        end
                     end
                 end
 

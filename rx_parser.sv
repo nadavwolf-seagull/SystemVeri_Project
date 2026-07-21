@@ -17,6 +17,19 @@ module rx_parser #(
     output logic                         parse_error
 );
 
+    localparam logic [lab12_pkg::CMD_ADDR_WIDTH-1:0]
+        PIXEL_ALIAS_BASE =
+            lab12_pkg::PIXEL_ALIAS_BASE_ADDR[
+                lab12_pkg::CMD_ADDR_WIDTH-1:0
+            ];
+
+    localparam logic [lab12_pkg::CMD_ADDR_WIDTH-1:0]
+        PIXEL_ALIAS_END =
+            PIXEL_ALIAS_BASE +
+            lab12_pkg::CMD_ADDR_WIDTH'(
+                lab12_pkg::PIXEL_ALIAS_SIZE_BYTES
+            );
+
     logic [7:0] ch [0:MAX_FRAME_BYTES-1];
 
     genvar i;
@@ -61,37 +74,47 @@ module rx_parser #(
     endfunction
 
     logic rgf_write_format_ok;
-    logic rgf_read_format_ok;
+    logic read_format_ok;
     logic pixel_write_format_ok;
-    logic image_format_ok;
+    logic image_write_format_ok;
+    logic image_read_format_ok;
 
     logic rgf_write_hex_ok;
-    logic rgf_read_hex_ok;
+    logic read_hex_ok;
     logic pixel_write_hex_ok;
+    logic image_hex_ok;
+    logic image_dimensions_ok;
 
     logic [23:0] decoded_addr;
     logic [31:0] decoded_rgf_data;
     logic [23:0] decoded_pixel;
+    logic [15:0] decoded_height;
+    logic [15:0] decoded_width;
+
+    logic decoded_addr_is_pixel;
 
     always_comb begin
-        rgf_write_format_ok   = 1'b0;
-        rgf_read_format_ok    = 1'b0;
-        pixel_write_format_ok = 1'b0;
-        image_format_ok       = 1'b0;
+        rgf_write_format_ok    = 1'b0;
+        read_format_ok         = 1'b0;
+        pixel_write_format_ok  = 1'b0;
+        image_write_format_ok  = 1'b0;
+        image_read_format_ok   = 1'b0;
 
-        rgf_write_hex_ok   = 1'b0;
-        rgf_read_hex_ok    = 1'b0;
-        pixel_write_hex_ok = 1'b0;
+        rgf_write_hex_ok       = 1'b0;
+        read_hex_ok            = 1'b0;
+        pixel_write_hex_ok     = 1'b0;
+        image_hex_ok           = 1'b0;
+        image_dimensions_ok    = 1'b0;
 
-        decoded_addr     = '0;
-        decoded_rgf_data = '0;
-        decoded_pixel    = '0;
+        decoded_addr           = '0;
+        decoded_rgf_data       = '0;
+        decoded_pixel          = '0;
+        decoded_height         = '0;
+        decoded_width          = '0;
+        decoded_addr_is_pixel  = 1'b0;
 
-        // --------------------------------------------------------
-        // Register Write
+        // Register Write:
         // {W<00,00,04>,V<00,12,34>,V<00,56,78>}
-        // Length = 37
-        // --------------------------------------------------------
         rgf_write_format_ok =
             (frame_len == 37) &&
             (ch[0]  == lab12_pkg::ASCII_LBRACE) &&
@@ -118,21 +141,16 @@ module rx_parser #(
             is_hex(ch[3])  && is_hex(ch[4])  &&
             is_hex(ch[6])  && is_hex(ch[7])  &&
             is_hex(ch[9])  && is_hex(ch[10]) &&
-
             is_hex(ch[15]) && is_hex(ch[16]) &&
             is_hex(ch[18]) && is_hex(ch[19]) &&
             is_hex(ch[21]) && is_hex(ch[22]) &&
-
             is_hex(ch[27]) && is_hex(ch[28]) &&
             is_hex(ch[30]) && is_hex(ch[31]) &&
             is_hex(ch[33]) && is_hex(ch[34]);
 
-        // --------------------------------------------------------
-        // Register Read
-        // {R<00,00,04>}
-        // Length = 13
-        // --------------------------------------------------------
-        rgf_read_format_ok =
+        // Register or Pixel Read:
+        // {R<00,00,04>} or {R<10,00,00>}
+        read_format_ok =
             (frame_len == 13) &&
             (ch[0]  == lab12_pkg::ASCII_LBRACE) &&
             (ch[1]  == lab12_pkg::ASCII_R)      &&
@@ -142,16 +160,13 @@ module rx_parser #(
             (ch[11] == lab12_pkg::ASCII_RANGLE) &&
             (ch[12] == lab12_pkg::ASCII_RBRACE);
 
-        rgf_read_hex_ok =
+        read_hex_ok =
             is_hex(ch[3])  && is_hex(ch[4])  &&
             is_hex(ch[6])  && is_hex(ch[7])  &&
             is_hex(ch[9])  && is_hex(ch[10]);
 
-        // --------------------------------------------------------
-        // Pixel Write
-        // {W<00,03,05>,P<FF,00,00>}
-        // Length = 25
-        // --------------------------------------------------------
+        // Pixel Write:
+        // {W<10,00,00>,P<FF,00,00>}
         pixel_write_format_ok =
             (frame_len == 25) &&
             (ch[0]  == lab12_pkg::ASCII_LBRACE) &&
@@ -172,20 +187,68 @@ module rx_parser #(
             is_hex(ch[3])  && is_hex(ch[4])  &&
             is_hex(ch[6])  && is_hex(ch[7])  &&
             is_hex(ch[9])  && is_hex(ch[10]) &&
-
             is_hex(ch[15]) && is_hex(ch[16]) &&
             is_hex(ch[18]) && is_hex(ch[19]) &&
             is_hex(ch[21]) && is_hex(ch[22]);
 
-        // --------------------------------------------------------
-        // Full image command
-        // {I}
-        // --------------------------------------------------------
-        image_format_ok =
-            (frame_len == 3) &&
-            (ch[0] == lab12_pkg::ASCII_LBRACE) &&
-            (ch[1] == lab12_pkg::ASCII_I)      &&
-            (ch[2] == lab12_pkg::ASCII_RBRACE);
+        // Full-image Write:
+        // {I<20,00,00>,H<00,01,00>,W<00,01,00>}
+        image_write_format_ok =
+            (frame_len == 37) &&
+            (ch[0]  == lab12_pkg::ASCII_LBRACE) &&
+            (ch[1]  == lab12_pkg::ASCII_I)      &&
+            (ch[2]  == lab12_pkg::ASCII_LANGLE) &&
+            (ch[5]  == lab12_pkg::ASCII_COMMA)  &&
+            (ch[8]  == lab12_pkg::ASCII_COMMA)  &&
+            (ch[11] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[12] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[13] == "H")                     &&
+            (ch[14] == lab12_pkg::ASCII_LANGLE) &&
+            (ch[17] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[20] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[23] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[24] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[25] == lab12_pkg::ASCII_W)      &&
+            (ch[26] == lab12_pkg::ASCII_LANGLE) &&
+            (ch[29] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[32] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[35] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[36] == lab12_pkg::ASCII_RBRACE);
+
+        // Full-image Read:
+        // {R<20,00,00>,H<00,01,00>,W<00,01,00>}
+        image_read_format_ok =
+            (frame_len == 37) &&
+            (ch[0]  == lab12_pkg::ASCII_LBRACE) &&
+            (ch[1]  == lab12_pkg::ASCII_R)      &&
+            (ch[2]  == lab12_pkg::ASCII_LANGLE) &&
+            (ch[5]  == lab12_pkg::ASCII_COMMA)  &&
+            (ch[8]  == lab12_pkg::ASCII_COMMA)  &&
+            (ch[11] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[12] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[13] == "H")                     &&
+            (ch[14] == lab12_pkg::ASCII_LANGLE) &&
+            (ch[17] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[20] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[23] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[24] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[25] == lab12_pkg::ASCII_W)      &&
+            (ch[26] == lab12_pkg::ASCII_LANGLE) &&
+            (ch[29] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[32] == lab12_pkg::ASCII_COMMA)  &&
+            (ch[35] == lab12_pkg::ASCII_RANGLE) &&
+            (ch[36] == lab12_pkg::ASCII_RBRACE);
+
+        image_hex_ok =
+            is_hex(ch[3])  && is_hex(ch[4])  &&
+            is_hex(ch[6])  && is_hex(ch[7])  &&
+            is_hex(ch[9])  && is_hex(ch[10]) &&
+            is_hex(ch[15]) && is_hex(ch[16]) &&
+            is_hex(ch[18]) && is_hex(ch[19]) &&
+            is_hex(ch[21]) && is_hex(ch[22]) &&
+            is_hex(ch[27]) && is_hex(ch[28]) &&
+            is_hex(ch[30]) && is_hex(ch[31]) &&
+            is_hex(ch[33]) && is_hex(ch[34]);
 
         decoded_addr = {
             ascii_hex_byte(ch[3], ch[4]),
@@ -193,12 +256,6 @@ module rx_parser #(
             ascii_hex_byte(ch[9], ch[10])
         };
 
-        /*
-         * Register value format:
-         * V<00,DH1,DH0>,V<00,DL1,DL0>
-         *
-         * Leading 00 fields are currently ignored.
-         */
         decoded_rgf_data = {
             ascii_hex_byte(ch[18], ch[19]),
             ascii_hex_byte(ch[21], ch[22]),
@@ -211,6 +268,26 @@ module rx_parser #(
             ascii_hex_byte(ch[18], ch[19]),
             ascii_hex_byte(ch[21], ch[22])
         };
+
+        decoded_height = {
+            ascii_hex_byte(ch[18], ch[19]),
+            ascii_hex_byte(ch[21], ch[22])
+        };
+
+        decoded_width = {
+            ascii_hex_byte(ch[30], ch[31]),
+            ascii_hex_byte(ch[33], ch[34])
+        };
+
+        image_dimensions_ok =
+            (ascii_hex_byte(ch[15], ch[16]) == 8'h00) &&
+            (ascii_hex_byte(ch[27], ch[28]) == 8'h00) &&
+            (decoded_height != 16'h0000) &&
+            (decoded_width  != 16'h0000);
+
+        decoded_addr_is_pixel =
+            (decoded_addr >= PIXEL_ALIAS_BASE) &&
+            (decoded_addr <  PIXEL_ALIAS_END);
     end
 
     always_comb begin
@@ -230,30 +307,48 @@ module rx_parser #(
                 parsed_addr   = decoded_addr;
                 parsed_data   = decoded_rgf_data;
             end
-            else if (rgf_read_format_ok && rgf_read_hex_ok) begin
+            else if (
+                image_write_format_ok &&
+                image_hex_ok &&
+                image_dimensions_ok
+            ) begin
                 parsed_valid  = 1'b1;
-                parsed_opcode = lab12_pkg::RX_CMD_RGF_READ;
+                parsed_opcode = lab12_pkg::RX_CMD_IMAGE_WRITE;
                 parsed_addr   = decoded_addr;
-                parsed_data   = '0;
+                parsed_data   = {decoded_height, decoded_width};
             end
-            else if (pixel_write_format_ok && pixel_write_hex_ok) begin
-                parsed_valid  = 1'b1;
-                parsed_opcode = lab12_pkg::RX_CMD_PIXEL_WRITE;
-                parsed_addr   = decoded_addr;
-                parsed_data   = {
-                    8'h00,
-                    decoded_pixel
-                };
-            end
-            else if (image_format_ok) begin
+            else if (
+                image_read_format_ok &&
+                image_hex_ok &&
+                image_dimensions_ok
+            ) begin
                 parsed_valid  = 1'b1;
                 parsed_opcode = lab12_pkg::RX_CMD_IMAGE_READ;
-                parsed_addr   = {
-                    {(lab12_pkg::CMD_ADDR_WIDTH-
-                       lab12_pkg::RGF_ADDR_WIDTH){1'b0}},
-                    lab12_pkg::RGF_ADDR_CTRL
-                };
-                parsed_data = 32'h0000_0001;
+                parsed_addr   = decoded_addr;
+                parsed_data   = {decoded_height, decoded_width};
+            end
+            else if (pixel_write_format_ok && pixel_write_hex_ok) begin
+                if (decoded_addr_is_pixel) begin
+                    parsed_valid  = 1'b1;
+                    parsed_opcode = lab12_pkg::RX_CMD_PIXEL_WRITE;
+                    parsed_addr   = decoded_addr;
+                    parsed_data   = {8'h00, decoded_pixel};
+                end
+                else begin
+                    parse_error = 1'b1;
+                end
+            end
+            else if (read_format_ok && read_hex_ok) begin
+                parsed_valid = 1'b1;
+                parsed_addr  = decoded_addr;
+                parsed_data  = '0;
+
+                if (decoded_addr_is_pixel) begin
+                    parsed_opcode = lab12_pkg::RX_CMD_PIXEL_READ;
+                end
+                else begin
+                    parsed_opcode = lab12_pkg::RX_CMD_RGF_READ;
+                end
             end
             else begin
                 parse_error = 1'b1;

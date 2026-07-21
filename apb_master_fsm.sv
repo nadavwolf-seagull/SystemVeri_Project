@@ -12,9 +12,10 @@
 //   ACCESS : PSEL=1, PENABLE=1, wait for PREADY
 //   RESP   : hold read response until the TX response path accepts it
 //
-// Lab 11 note:
-//   RX_CMD_IMAGE_READ is implemented as read-modify-write of CTRL.
-//   This sets CTRL[0] without clearing clk_sel/parity_enable bits.
+// Final-project note:
+//   Image read/write commands use read-modify-write of CTRL.
+//   The requested DMA start bit is set without clearing the
+//   existing clk_sel, parity_enable, or other control bits.
 // ============================================================
 module apb_master_fsm (
     input  logic clk,
@@ -47,7 +48,7 @@ module apb_master_fsm (
         ST_ACCESS,
         ST_RESP,
 
-        // Internal read-modify-write states for RX_CMD_IMAGE_READ
+        // Internal read-modify-write states for image read/write commands
         ST_IMG_RD_SETUP,
         ST_IMG_RD_ACCESS,
         ST_IMG_WR_SETUP,
@@ -64,6 +65,7 @@ module apb_master_fsm (
     logic accept_cmd;
     logic cmd_is_write;
     logic cmd_is_read;
+    logic [lab12_pkg::RGF_DATA_WIDTH-1:0] image_start_mask;
 
     assign accept_cmd = cmd_valid && cmd_ready;
 
@@ -72,6 +74,21 @@ module apb_master_fsm (
 
     assign cmd_is_read =
         (cmd_opcode == lab12_pkg::RX_CMD_RGF_READ);
+
+    always_comb begin
+        image_start_mask = '0;
+
+        if (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_READ) begin
+            image_start_mask[
+                lab12_pkg::RGF_CTRL_DMA_RD_START_BIT
+            ] = 1'b1;
+        end
+        else if (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_WRITE) begin
+            image_start_mask[
+                lab12_pkg::RGF_CTRL_DMA_WR_START_BIT
+            ] = 1'b1;
+        end
+    end
 
     // Ready only when the master can capture a new command.
     assign cmd_ready = (state == ST_IDLE);
@@ -131,11 +148,12 @@ module apb_master_fsm (
                     rsp_valid <= 1'b0;
 
                     if (accept_cmd) begin
-                        if (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_READ) begin
-                            // Do not overwrite CTRL with 32'h1.
-                            // First read current CTRL, then OR bit 0, then write back.
+                        if (
+                            (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_READ) ||
+                            (cmd_opcode == lab12_pkg::RX_CMD_IMAGE_WRITE)
+                        ) begin
                             addr_reg  <= lab12_pkg::RGF_ADDR_CTRL;
-                            wdata_reg <= '0;
+                            wdata_reg <= image_start_mask;
                             write_reg <= 1'b0;
                             read_reg  <= 1'b0;
                             state     <= ST_IMG_RD_SETUP;
@@ -193,8 +211,9 @@ module apb_master_fsm (
                 end
 
                 // ------------------------------------------------
-                // IMAGE_READ read-modify-write path:
-                // APB read CTRL, then APB write CTRL | 1
+                // Image-command read-modify-write path:
+                // Read CTRL, OR the requested DMA start mask,
+                // then write the updated value back.
                 // ------------------------------------------------
                 ST_IMG_RD_SETUP: begin
                     state <= ST_IMG_RD_ACCESS;
@@ -205,9 +224,10 @@ module apb_master_fsm (
                         apb_error_pulse <= apb.PSLVERR;
 
                         // Prepare write-back value.
-                        // Set bit 0 while preserving all other CTRL bits.
+                        // Set the requested DMA start bit while preserving
+                        // all other CTRL bits.
                         addr_reg  <= lab12_pkg::RGF_ADDR_CTRL;
-                        wdata_reg <= apb.PRDATA | lab12_pkg::RGF_DATA_WIDTH'(1);
+                        wdata_reg <= apb.PRDATA | wdata_reg;
                         write_reg <= 1'b1;
                         read_reg  <= 1'b0;
                         state     <= ST_IMG_WR_SETUP;
