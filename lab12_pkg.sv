@@ -232,22 +232,41 @@ package lab12_pkg;
     // ============================================================
     // RGF REGISTER ADDRESSES
     // ============================================================
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_CTRL          = 4'h0;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_STATUS        = 4'h1;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_IMG_WIDTH     = 4'h2;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_IMG_HEIGHT    = 4'h3;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_FIFO_AE_LEVEL = 4'h4;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_FIFO_AF_LEVEL = 4'h5;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_ERROR_STATUS  = 4'h6;
-    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_VERSION       = 4'h7;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_CTRL           = 4'h0;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_STATUS         = 4'h1;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_IMG_WIDTH      = 4'h2;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_IMG_HEIGHT     = 4'h3;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_FIFO_AE_LEVEL  = 4'h4;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_FIFO_AF_LEVEL  = 4'h5;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_ERROR_STATUS   = 4'h6;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_VERSION        = 4'h7;
     parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_UART_ERROR_CNT = 4'h8;
+
+    // Final-project DMA configuration and progress registers
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_IMG_BASE       = 4'h9;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_WR_ROW_CNT     = 4'hA;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_WR_COL_CNT     = 4'hB;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_RD_ROW_CNT     = 4'hC;
+    parameter logic [RGF_ADDR_WIDTH-1:0] RGF_ADDR_RD_COL_CNT     = 4'hD;
 
     // ============================================================
     // CTRL REGISTER BITS
     // ============================================================
-    parameter int unsigned RGF_CTRL_IMAGE_START_BIT = 0;
+
+    // Bit 0 preserves the previous image-start behavior and now starts
+    // a DMA read operation from SRAM toward the UART TX path.
+    parameter int unsigned RGF_CTRL_DMA_RD_START_BIT = 0;
+
+    // Existing Lab 11 controls
     parameter int unsigned RGF_CTRL_CLK_SEL_BIT       = 1;
     parameter int unsigned RGF_CTRL_PARITY_ENABLE_BIT = 2;
+
+    // Starts a DMA write operation from the UART RX path toward SRAM.
+    parameter int unsigned RGF_CTRL_DMA_WR_START_BIT = 3;
+
+    // Backward-compatible alias for existing modules during integration.
+    parameter int unsigned RGF_CTRL_IMAGE_START_BIT =
+        RGF_CTRL_DMA_RD_START_BIT;
 
     // ============================================================
     // STATUS REGISTER BITS
