@@ -1,0 +1,12 @@
+lab12_pkg.sv
+ahb_lite_if.sv
+ram_1r1w.sv
+async_fifo.sv
+rgb_async_fifo_bank.sv
+rgb_sram_project_storage.sv
+ahb_rgb_sram_slave.sv
+ahb_rgb_sram_subsystem.sv
+final_project_memory_cluster.sv
+final_project_ahb_master_fsm.sv
+rgb_dma_sequencer.sv
+final_project_dma_cluster.sv

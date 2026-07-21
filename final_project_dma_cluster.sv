@@ -93,6 +93,16 @@ module final_project_dma_cluster #(
     logic [2:0] tx_ready_sys;
     logic [2:0] tx_almost_full_sys;
 
+    logic ahb_bar_cmd_ready;
+    logic bar_access_allowed;
+
+    // Preserve image-transfer atomicity. A BAR request may be held valid while
+    // DMA is active, but it is accepted only after dma_busy returns low. Start
+    // pulses are included so a BAR request cannot slip in on the start cycle.
+    assign bar_access_allowed =
+        !dma_busy && !dma_wr_start && !dma_rd_start;
+    assign bar_cmd_ready = ahb_bar_cmd_ready && bar_access_allowed;
+
     rgb_dma_sequencer u_sequencer (
         .clk               (clk_sys),
         .rst_n             (rst_sys_n),
@@ -133,8 +143,8 @@ module final_project_dma_cluster #(
     final_project_ahb_master_fsm u_ahb_master_fsm (
         .clk             (clk_sys),
         .rst_n           (rst_sys_n),
-        .bar_cmd_valid   (bar_cmd_valid),
-        .bar_cmd_ready   (bar_cmd_ready),
+        .bar_cmd_valid   (bar_cmd_valid && bar_access_allowed),
+        .bar_cmd_ready   (ahb_bar_cmd_ready),
         .bar_cmd_write   (bar_cmd_write),
         .bar_cmd_addr    (bar_cmd_addr),
         .bar_cmd_data    (bar_cmd_data),
