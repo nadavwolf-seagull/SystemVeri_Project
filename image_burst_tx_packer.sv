@@ -192,11 +192,11 @@ module image_burst_tx_packer #(
                 WAIT_PACKET_DONE: begin
                     if (packet_done) begin
                         if (
-                            (sent_pixels + pixels_in_packet) >=
+                            (sent_pixels + 32'(pixels_in_packet)) >=
                             total_pixels
                         ) begin
                             sent_pixels <=
-                                sent_pixels + pixels_in_packet;
+                                sent_pixels + 32'(pixels_in_packet);
 
                             active <= 1'b0;
                             done   <= 1'b1;
@@ -204,7 +204,7 @@ module image_burst_tx_packer #(
                         end
                         else begin
                             sent_pixels <=
-                                sent_pixels + pixels_in_packet;
+                                sent_pixels + 32'(pixels_in_packet);
 
                             state <= REQUEST_WORD;
                         end
