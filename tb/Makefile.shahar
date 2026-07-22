@@ -1,10 +1,14 @@
 # ============================================================
 # Shahar Verification Makefile
+#
 # Usage examples:
 #
 # make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver
-# make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver lint
-# make -f Makefile.shahar TOP=tb_image_burst_rx_deinterleaver clean
+# make -f Makefile.shahar TOP=tb_image_burst_tx_packer
+# make -f Makefile.shahar TOP=tb_control_path
+#
+# make -f Makefile.shahar TOP=tb_control_path lint
+# make -f Makefile.shahar TOP=tb_control_path clean
 # ============================================================
 
 TOP       ?= tb_image_burst_rx_deinterleaver
@@ -35,6 +39,16 @@ else ifeq ($(TOP),tb_image_burst_tx_packer)
 RTL_SRCS := \
     $(RTL_DIR)/lab12_pkg.sv \
     $(RTL_DIR)/image_burst_tx_packer.sv
+
+else ifeq ($(TOP),tb_control_path)
+
+RTL_SRCS := \
+    $(RTL_DIR)/lab12_pkg.sv \
+    $(RTL_DIR)/apb_if.sv \
+    $(RTL_DIR)/rx_parser.sv \
+    $(RTL_DIR)/rx_classifier.sv \
+    $(RTL_DIR)/bar.sv \
+    $(RTL_DIR)/apb_master_fsm.sv
 
 else ifeq ($(TOP),tb_seq_img_cluster)
 
