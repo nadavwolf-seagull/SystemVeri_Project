@@ -1,0 +1,20 @@
+verilated_fst_c.o: \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_fst_c.cpp \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_config.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilatedos.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_types.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_funcs.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_fst_c.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_trace.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_variable_info.cpp \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_variable_info.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_assertion.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_stream_write_helper.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_file.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_writer.cpp \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/fstcpp/fstcpp_writer.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_trace_imp.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_intrinsics.h \
+ /home/shaharpi/my_projects/cdv_feb26/third-party/verilator/include/verilated_threads.h
