@@ -200,7 +200,11 @@ module bar (
             apb_rsp_ready = 1'b1;
         end
 
-        if (state == BAR_WAIT_AHB_READ) begin
+        // The AHB master returns a completion response for both reads and
+        // writes. A write response is consumed locally; a read response is
+        // forwarded through the unified response interface below.
+        if ((state == BAR_WAIT_AHB_WRITE) ||
+            (state == BAR_WAIT_AHB_READ)) begin
             ahb_rsp_ready = 1'b1;
         end
     end
@@ -294,10 +298,12 @@ module bar (
                     end
                 end
 
-                // The AHB master follows the same ready/busy rule
-                // for a write transaction.
+                // The AHB master reports completion for both reads and
+                // writes and remains in its response-hold state until
+                // ahb_rsp_ready is asserted. Consume a write completion
+                // locally because UART writes do not require a response.
                 BAR_WAIT_AHB_WRITE: begin
-                    if (ahb_cmd_ready) begin
+                    if (ahb_rsp_valid && ahb_rsp_ready) begin
                         state <= BAR_IDLE;
                     end
                 end
