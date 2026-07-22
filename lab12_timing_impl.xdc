@@ -30,4 +30,4 @@ set_clock_groups -logically_exclusive \
 set_false_path \
     -from [get_cells u_lab12_clock_wrapper/pll_locked_sync_reg] \
     -to [get_pins \
-        u_lab12_clock_wrapper/u_glitchless_clk_mux/u_bufgmux/CE1]
+        u_lab12_clock_wrapper/u_glitchless_clk_mux/u_bufgmux/S]

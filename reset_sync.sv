@@ -10,7 +10,7 @@ module reset_sync #(
     output logic rst_n
 );
 
-    logic [STAGES-1:0] sync_ff;
+    (* ASYNC_REG = "TRUE" *) logic [STAGES-1:0] sync_ff;
 
     always_ff @(posedge clk or negedge arst_n) begin
         if (!arst_n)

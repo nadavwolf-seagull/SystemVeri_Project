@@ -17,7 +17,7 @@ module board_top (
     import lab12_pkg::*;
 
     // =========================================================
-    // LAB 12 CLOCKS AND RESETS
+    // FINAL-PROJECT CLOCKS AND RESETS
     // =========================================================
     logic clk_ctrl;
     logic clk_img;
@@ -30,8 +30,8 @@ module board_top (
     logic pll_locked;
     logic clk_mux_sel_dbg;
 
-    // Legacy RGF output retained temporarily.
-    // Lab 12 clock selection is controlled by PLL lock.
+    // Legacy RGF output retained for interface/debug compatibility.
+    // It no longer controls the board clock mux.
     logic clk_sel;
 
     // =========================================================
@@ -78,45 +78,45 @@ module board_top (
     logic rx_framing_error_dbg;
 
     // =========================================================
-    // LAB 12 CLOCK AND RESET WRAPPER
+    // FINAL-PROJECT CLOCK AND RESET WRAPPER
     // =========================================================
-    lab12_clock_wrapper u_lab12_clock_wrapper (
-        .clk_100mhz      (CLK100MHZ),
-        .arst_n          (CPU_RESETN),
+    // Keep the legacy instance name because lab12_timing_impl.xdc addresses
+    // the clock mux through this hierarchy path.
+    final_project_clock_wrapper u_lab12_clock_wrapper (
+        .clk_100mhz (CLK100MHZ),
+        .arst_n     (CPU_RESETN),
 
-        // Kept temporarily for interface compatibility.
-        // Clock switching is controlled internally by PLL lock.
-        .clk_fast_req    (clk_sel),
+        .clk_sys    (clk_ctrl),
+        .clk_fast   (clk_uart),
 
-        .clk_ctrl        (clk_ctrl),
-        .clk_selected    (clk_img),
-        .clk_uart        (clk_uart),
+        .rst_sys_n  (rst_ctrl_n),
+        .rst_fast_n (rst_uart_n),
 
-        .rst_ctrl_n      (rst_ctrl_n),
-        .rst_selected_n  (rst_img_n),
-        .rst_uart_n      (rst_uart_n),
-
-        .pll_locked      (pll_locked),
-        .clk_mux_sel_dbg (clk_mux_sel_dbg)
+        .pll_locked (pll_locked)
     );
 
+    // The DMA, AHB and SRAM image path belongs to the 100 MHz system domain.
+    // These aliases preserve chip_top's existing three-clock interface.
+    assign clk_img   = clk_ctrl;
+    assign rst_img_n = rst_ctrl_n;
+
+    // Legacy debug alias: the fast clock selects 280 MHz after PLL lock.
+    assign clk_mux_sel_dbg = pll_locked;
 
     // =========================================================
     // UART FLOW-CONTROL SYNCHRONIZATION
     // =========================================================
-    logic uart_rts_meta;
     logic uart_rts_sync;
 
-    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
-        if (!rst_uart_n) begin
-            uart_rts_meta <= 1'b1;
-            uart_rts_sync <= 1'b1;
-        end
-        else begin
-            uart_rts_meta <= UART_RTS;
-            uart_rts_sync <= uart_rts_meta;
-        end
-    end
+    // UART_RTS is an asynchronous single-bit level.
+    cdc_2ff_sync #(
+        .RESET_VALUE (1'b1)
+    ) u_uart_rts_2ff (
+        .clk      (clk_uart),
+        .rst_n    (rst_uart_n),
+        .async_in (UART_RTS),
+        .sync_out (uart_rts_sync)
+    );
 
     // TX path is always enabled.
     assign tx_en = 1'b1;
