@@ -318,8 +318,19 @@ module tb_image_burst_rx_deinterleaver;
 
         wait (payload_ready === 1'b0);
 
+        // RX_PROCESS_BYTE intentionally inserts one pipeline cycle after
+        // capturing the final blue byte. Wait until that byte has been
+        // committed and the complete group is being held for the FIFO.
+        wait (
+            (fifo_r_data === 32'h41424344) &&
+            (fifo_g_data === 32'h51525354) &&
+            (fifo_b_data === 32'h61626364)
+        );
+        #1;
+
         repeat (3) begin
             @(posedge clk);
+            #1;
 
             if (fifo_push !== 1'b0) begin
                 $fatal(
@@ -333,7 +344,10 @@ module tb_image_burst_rx_deinterleaver;
                 fifo_b_data !== 32'h61626364) begin
                 $fatal(
                     1,
-                    "FIFO data changed during backpressure"
+                    "FIFO data changed during backpressure: R=%08h G=%08h B=%08h",
+                    fifo_r_data,
+                    fifo_g_data,
+                    fifo_b_data
                 );
             end
         end
@@ -400,6 +414,9 @@ module tb_image_burst_rx_deinterleaver;
 
         start_image(16'd4, 16'd1);
 
+        wait (payload_error === 1'b1);
+        #1;
+
         if (payload_error !== 1'b1) begin
             $fatal(
                 1,
@@ -422,6 +439,9 @@ module tb_image_burst_rx_deinterleaver;
         apply_reset();
 
         start_image(16'd0, 16'd4);
+
+        wait (payload_error === 1'b1);
+        #1;
 
         if (payload_error !== 1'b1) begin
             $fatal(

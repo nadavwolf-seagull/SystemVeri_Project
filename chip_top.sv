@@ -378,6 +378,8 @@ module chip_top #(
     logic [2:0] fast_status_event_sys;
     logic dma_tx_empty_sys;
     logic dma_rx_full_sys;
+    logic dma_tx_empty_fast_cdc;
+    logic dma_rx_full_fast_cdc;
 
     logic        image_payload_active;
     logic        image_payload_ready;
@@ -727,6 +729,9 @@ module chip_top #(
     rx_parser #(
         .MAX_FRAME_BYTES (RX_MAX_FRAME_BYTES)
     ) u_rx_parser (
+        .clk           (clk_uart),
+        .rst_n         (rst_uart_n),
+
         .frame_data    (rx_frame_data),
         .frame_len     (rx_frame_len),
         .frame_valid   (rx_frame_valid),
@@ -1046,19 +1051,33 @@ module chip_top #(
     assign fast_status_event_sys =
         fast_status_dst_data & {3{fast_status_dst_valid}};
 
+    // Register the reduced three-channel FIFO status in its source domain
+    // before the 2FF crossing. This prevents combinational glitches from
+    // reaching the first synchronizer stage.
+    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
+        if (!rst_uart_n) begin
+            dma_tx_empty_fast_cdc <= 1'b1;
+            dma_rx_full_fast_cdc  <= 1'b0;
+        end
+        else begin
+            dma_tx_empty_fast_cdc <= dma_tx_empty_fast;
+            dma_rx_full_fast_cdc  <= !dma_rx_ready_fast;
+        end
+    end
+
     cdc_2ff_sync #(
         .RESET_VALUE(1'b1)
     ) u_tx_empty_2ff (
         .clk      (clk_ctrl),
         .rst_n    (rst_ctrl_n),
-        .async_in (dma_tx_empty_fast),
+        .async_in (dma_tx_empty_fast_cdc),
         .sync_out (dma_tx_empty_sys)
     );
 
     cdc_2ff_sync u_rx_full_2ff (
         .clk      (clk_ctrl),
         .rst_n    (rst_ctrl_n),
-        .async_in (!dma_rx_ready_fast),
+        .async_in (dma_rx_full_fast_cdc),
         .sync_out (dma_rx_full_sys)
     );
 

@@ -65,6 +65,8 @@ module rgb_dma_sequencer #(
 
     typedef enum logic [3:0] {
         ST_IDLE,
+        ST_CFG_MULTIPLY,
+        ST_CFG_VALIDATE,
         ST_RX_POP,
         ST_RX_WAIT,
         ST_ISSUE,
@@ -80,9 +82,11 @@ module rgb_dma_sequencer #(
     logic [1:0] word_index_q;
 
     logic [23:0] active_r_base_q;
-    logic [15:0] active_width_q;
     logic [15:0] active_height_q;
     logic [15:0] words_per_row_q;
+    logic [31:0] total_words_q;
+    logic [31:0] active_base_offset_q;
+    logic [31:0] image_word_index_q;
     logic [15:0] row_q;
     logic [15:0] word_col_q;
 
@@ -92,10 +96,7 @@ module rgb_dma_sequencer #(
     logic [15:0] cfg_width;
     logic [15:0] cfg_height;
     logic [23:0] cfg_r_base;
-    logic [31:0] cfg_words_per_row;
-    logic [31:0] cfg_total_words;
-    logic [31:0] cfg_base_offset;
-    logic        cfg_valid;
+    logic        cfg_basic_valid;
 
     logic selected_rx_empty;
     logic selected_rx_valid;
@@ -104,28 +105,22 @@ module rgb_dma_sequencer #(
     logic [31:0] selected_tx_data;
 
     logic [23:0] channel_base;
-    logic [31:0] current_word_index;
     logic [31:0] current_byte_offset;
 
     assign cfg_width  = (img_width  != 0) ? img_width  : IMG_WIDTH[15:0];
     assign cfg_height = (img_height != 0) ? img_height : IMG_HEIGHT[15:0];
     assign cfg_r_base = (img_base   != 0) ? img_base   : R_BASE;
 
-    assign cfg_words_per_row = {16'd0, cfg_width} >> 2;
-    assign cfg_total_words   = cfg_words_per_row * {16'd0, cfg_height};
-    assign cfg_base_offset   = {8'd0, cfg_r_base} - {8'd0, R_BASE};
-
-    // INCR4 only: every row must contain an integer number of 16-pixel bursts.
-    assign cfg_valid =
+    // First-stage validation deliberately excludes the image-size multiply.
+    // The multiply is registered in ST_CFG_MULTIPLY so it is not part of the
+    // command-accept and counter-control timing paths.
+    assign cfg_basic_valid =
         (dma_wr_start ^ dma_rd_start) &&
         (cfg_width  != 0) &&
         (cfg_height != 0) &&
         (cfg_width[3:0] == 4'b0000) &&
         (cfg_r_base[1:0] == 2'b00) &&
-        (cfg_r_base >= R_BASE) &&
-        (cfg_base_offset < CHANNEL_BYTES) &&
-        (cfg_total_words <= ROM_DEPTH) &&
-        ((cfg_base_offset + (cfg_total_words << 2)) <= CHANNEL_BYTES);
+        (cfg_r_base >= R_BASE);
 
     assign busy = (state_q != ST_IDLE);
 
@@ -165,7 +160,7 @@ module rgb_dma_sequencer #(
     end
 
     always_comb begin
-        channel_base = R_BASE + cfg_base_offset[23:0];
+        channel_base = active_r_base_q;
         unique case (color_q)
             2'd0: channel_base = R_BASE + (active_r_base_q - R_BASE);
             2'd1: channel_base = G_BASE + (active_r_base_q - R_BASE);
@@ -173,9 +168,11 @@ module rgb_dma_sequencer #(
         endcase
     end
 
-    assign current_word_index =
-        ({16'd0, row_q} * {16'd0, words_per_row_q}) + {16'd0, word_col_q};
-    assign current_byte_offset = current_word_index << 2;
+    // The image is traversed linearly. Each completed R/G/B round advances
+    // by one INCR4 burst, namely four 32-bit words in every color channel.
+    // Keeping this registered index removes row*words_per_row from the active
+    // DMA address path.
+    assign current_byte_offset = image_word_index_q << 2;
 
     assign seq_cmd_valid = (state_q == ST_ISSUE);
     assign seq_cmd_write = is_write_q;
@@ -210,9 +207,11 @@ module rgb_dma_sequencer #(
             color_q         <= 2'd0;
             word_index_q    <= 2'd0;
             active_r_base_q <= R_BASE;
-            active_width_q  <= IMG_WIDTH[15:0];
             active_height_q <= IMG_HEIGHT[15:0];
             words_per_row_q <= IMG_WIDTH[15:0] >> 2;
+            total_words_q   <= (IMG_WIDTH * IMG_HEIGHT) >> 2;
+            active_base_offset_q <= '0;
+            image_word_index_q   <= '0;
             row_q           <= '0;
             word_col_q      <= '0;
             burst_wdata_q   <= '0;
@@ -231,33 +230,55 @@ module rgb_dma_sequencer #(
                 ST_IDLE: begin
                     if (dma_wr_start || dma_rd_start) begin
                         error <= 1'b0;
-                        if (!cfg_valid) begin
+                        if (!cfg_basic_valid) begin
                             error <= 1'b1;
                         end
                         else begin
                             is_write_q      <= dma_wr_start;
                             active_r_base_q <= cfg_r_base;
-                            active_width_q  <= cfg_width;
                             active_height_q <= cfg_height;
-                            words_per_row_q <= cfg_words_per_row[15:0];
+                            words_per_row_q <= cfg_width >> 2;
+                            active_base_offset_q <=
+                                {8'd0, cfg_r_base} - {8'd0, R_BASE};
+                            image_word_index_q <= '0;
                             row_q           <= '0;
                             word_col_q      <= '0;
                             color_q         <= 2'd0;
                             word_index_q    <= 2'd0;
                             burst_wdata_q   <= '0;
                             burst_rdata_q   <= '0;
-
-                            if (dma_wr_start) begin
-                                wr_row_cnt <= '0;
-                                wr_col_cnt <= '0;
-                                state_q    <= ST_RX_POP;
-                            end
-                            else begin
-                                rd_row_cnt <= '0;
-                                rd_col_cnt <= '0;
-                                state_q    <= ST_ISSUE;
-                            end
+                            state_q         <= ST_CFG_MULTIPLY;
                         end
+                    end
+                end
+
+                ST_CFG_MULTIPLY: begin
+                    // Registered multiply: operands were captured in IDLE,
+                    // and the result is consumed only in the following state.
+                    total_words_q <=
+                        {16'd0, words_per_row_q} *
+                        {16'd0, active_height_q};
+                    state_q <= ST_CFG_VALIDATE;
+                end
+
+                ST_CFG_VALIDATE: begin
+                    if ((total_words_q == 0) ||
+                        (total_words_q > ROM_DEPTH) ||
+                        (active_base_offset_q >= CHANNEL_BYTES) ||
+                        ((active_base_offset_q +
+                          (total_words_q << 2)) > CHANNEL_BYTES)) begin
+                        error   <= 1'b1;
+                        state_q <= ST_IDLE;
+                    end
+                    else if (is_write_q) begin
+                        wr_row_cnt <= '0;
+                        wr_col_cnt <= '0;
+                        state_q    <= ST_RX_POP;
+                    end
+                    else begin
+                        rd_row_cnt <= '0;
+                        rd_col_cnt <= '0;
+                        state_q    <= ST_ISSUE;
                     end
                 end
 
@@ -335,6 +356,8 @@ module rgb_dma_sequencer #(
                                 state_q <= ST_IDLE;
                             end
                             else begin
+                                image_word_index_q <=
+                                    image_word_index_q + 32'd4;
                                 row_q      <= row_q + 1'b1;
                                 word_col_q <= '0;
                                 if (is_write_q) begin
@@ -350,6 +373,8 @@ module rgb_dma_sequencer #(
                             end
                         end
                         else begin
+                            image_word_index_q <=
+                                image_word_index_q + 32'd4;
                             word_col_q <= word_col_q + 16'd4;
                             if (is_write_q) begin
                                 wr_col_cnt <= wr_col_cnt + 16'd16;

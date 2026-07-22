@@ -177,6 +177,9 @@ module tb_control_path;
     rx_parser #(
         .MAX_FRAME_BYTES (MAX_FRAME_BYTES)
     ) u_rx_parser (
+        .clk           (clk),
+        .rst_n         (rst_n),
+
         .frame_data    (frame_data),
         .frame_len     (frame_len),
         .frame_valid   (frame_valid),
@@ -435,6 +438,7 @@ module tb_control_path;
         input string text
     );
         int unsigned i;
+        int unsigned timeout;
 
         begin
             if (text.len() > MAX_FRAME_BYTES) begin
@@ -457,9 +461,24 @@ module tb_control_path;
             frame_valid = 1'b1;
             frame_error = 1'b0;
 
-            #1;
+            @(negedge clk);
 
-            if (parse_error !== 1'b0) begin
+            frame_valid = 1'b0;
+            frame_data  = '0;
+            frame_len   = '0;
+
+            timeout = 0;
+            while (
+                (parsed_valid !== 1'b1) &&
+                (parse_error !== 1'b1) &&
+                (timeout < 12)
+            ) begin
+                @(posedge clk);
+                #1;
+                timeout++;
+            end
+
+            if (parse_error === 1'b1) begin
                 $fatal(
                     1,
                     "Parser rejected frame: %s",
@@ -470,15 +489,9 @@ module tb_control_path;
             if (parsed_valid !== 1'b1) begin
                 $fatal(
                     1,
-                    "Parser did not assert parsed_valid"
+                    "Pipelined parser response timed out"
                 );
             end
-
-            @(negedge clk);
-
-            frame_valid = 1'b0;
-            frame_data  = '0;
-            frame_len   = '0;
         end
     endtask
 

@@ -31,6 +31,7 @@ module async_fifo #(
     localparam int unsigned ADDR_W = $clog2(DEPTH);
     localparam int unsigned PTR_W = ADDR_W + 1;
     localparam int unsigned LEVEL_W = $clog2(DEPTH + 1);
+    localparam int unsigned STATUS_PIPE_MARGIN = 2;
 
     logic [PTR_W-1:0] wbin_q, wbin_next;
     logic [PTR_W-1:0] rbin_q, rbin_next;
@@ -44,16 +45,16 @@ module async_fifo #(
     logic [PTR_W-1:0] wbin_sync_r;
     logic [PTR_W-1:0] wr_level_cur_ext;
     logic [PTR_W-1:0] rd_level_cur_ext;
-    logic [PTR_W-1:0] wr_level_next_ext;
-    logic [PTR_W-1:0] rd_level_next_ext;
-    logic [PTR_W-1:0] wr_free_next_ext;
+
+    // Registered thresholds keep the status comparison out of the
+    // pointer arithmetic path. Exact full/empty protection is unchanged.
+    logic [LEVEL_W-1:0] wr_used_threshold_q;
+    logic [LEVEL_W-1:0] rd_empty_threshold_q;
 
     logic wr_accept;
     logic rd_accept;
     logic wr_full_next;
     logic rd_empty_next;
-    logic wr_almost_full_next;
-    logic rd_almost_empty_next;
 
     logic [ADDR_W-1:0] wr_addr;
     logic [ADDR_W-1:0] rd_addr;
@@ -100,20 +101,10 @@ module async_fifo #(
 
     assign wr_level_cur_ext = wbin_q - rbin_sync_w;
     assign rd_level_cur_ext = wbin_sync_r - rbin_q;
-    assign wr_level = wr_level_cur_ext[LEVEL_W-1:0];
-    assign rd_level = rd_level_cur_ext[LEVEL_W-1:0];
-
-    assign wr_level_next_ext = wbin_next - rbin_sync_w;
-    assign rd_level_next_ext = wbin_sync_r - rbin_next;
-    assign wr_free_next_ext = PTR_W'(DEPTH) - wr_level_next_ext;
 
     assign wr_full_next =
         (wgray_next == {~rgray_wq2[PTR_W-1:PTR_W-2], rgray_wq2[PTR_W-3:0]});
     assign rd_empty_next = (rgray_next == wgray_rq2);
-    assign wr_almost_full_next =
-        (wr_free_next_ext <= wr_af_free_level);
-    assign rd_almost_empty_next =
-        (rd_level_next_ext <= rd_ae_level);
 
     always_ff @(posedge wr_clk or negedge wr_rst_n) begin
         if (!wr_rst_n) begin
@@ -143,13 +134,38 @@ module async_fifo #(
             wgray_q        <= '0;
             wr_full        <= 1'b0;
             wr_almost_full <= 1'b0;
+            wr_level       <= '0;
+            wr_used_threshold_q <= LEVEL_W'(DEPTH);
             wr_overflow    <= 1'b0;
         end
         else begin
             wbin_q         <= wbin_next;
             wgray_q        <= wgray_next;
             wr_full        <= wr_full_next;
-            wr_almost_full <= wr_almost_full_next;
+
+            // Level is status only; full remains the exact write guard.
+            // Registering it breaks the long Gray-to-binary/arithmetic/
+            // threshold chain that otherwise limits the fast clock.
+            wr_level <= wr_level_cur_ext[LEVEL_W-1:0];
+
+            // The status comparison is two registers behind the exact
+            // pointer. Move the warning point earlier by two entries so
+            // continuous writes still assert at the requested free level.
+            if (
+                wr_af_free_level >=
+                LEVEL_W'(DEPTH - STATUS_PIPE_MARGIN)
+            ) begin
+                wr_used_threshold_q <= '0;
+            end
+            else begin
+                wr_used_threshold_q <=
+                    LEVEL_W'(DEPTH - STATUS_PIPE_MARGIN) -
+                    wr_af_free_level;
+            end
+
+            wr_almost_full <=
+                (wr_level >= wr_used_threshold_q);
+
             wr_overflow    <= wr_push && wr_full;
         end
     end
@@ -160,6 +176,8 @@ module async_fifo #(
             rgray_q         <= '0;
             rd_empty        <= 1'b1;
             rd_almost_empty <= 1'b1;
+            rd_level        <= '0;
+            rd_empty_threshold_q <= '0;
             rd_data_valid   <= 1'b0;
             rd_underflow    <= 1'b0;
         end
@@ -167,7 +185,22 @@ module async_fifo #(
             rbin_q          <= rbin_next;
             rgray_q         <= rgray_next;
             rd_empty        <= rd_empty_next;
-            rd_almost_empty <= rd_almost_empty_next;
+
+            rd_level <= rd_level_cur_ext[LEVEL_W-1:0];
+            // Assert early by the matching two-entry pipeline margin.
+            if (
+                rd_ae_level >=
+                LEVEL_W'(DEPTH - STATUS_PIPE_MARGIN)
+            ) begin
+                rd_empty_threshold_q <= LEVEL_W'(DEPTH);
+            end
+            else begin
+                rd_empty_threshold_q <=
+                    rd_ae_level + LEVEL_W'(STATUS_PIPE_MARGIN);
+            end
+            rd_almost_empty <=
+                (rd_level <= rd_empty_threshold_q);
+
             rd_data_valid   <= rd_accept;
             rd_underflow    <= rd_pop && rd_empty;
         end
