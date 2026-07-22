@@ -123,16 +123,6 @@ module image_burst_rx_deinterleaver (
             end
 
             /*
-             * Keep the completed RGB words stable throughout the fifo_push
-             * cycle. Clear them only on the following clock.
-             */
-            else if (fifo_push) begin
-                r_word <= '0;
-                g_word <= '0;
-                b_word <= '0;
-            end
-
-            /*
              * A completed group is held until all three RX FIFOs
              * can accept it together.
              */

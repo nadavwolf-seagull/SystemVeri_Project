@@ -26,64 +26,34 @@ module tb_image_burst_rx_deinterleaver;
 
     int unsigned observed_push_count;
 
-    // ========================================================
-    // DUT
-    // ========================================================
-
     image_burst_rx_deinterleaver dut (
         .clk            (clk),
         .rst_n          (rst_n),
-
         .start          (start),
         .img_width      (img_width),
         .img_height     (img_height),
-
         .rx_byte        (rx_byte),
         .rx_byte_valid  (rx_byte_valid),
-
         .fifo_ready     (fifo_ready),
-
         .fifo_push      (fifo_push),
         .fifo_r_data    (fifo_r_data),
         .fifo_g_data    (fifo_g_data),
         .fifo_b_data    (fifo_b_data),
-
         .payload_active (payload_active),
         .payload_ready  (payload_ready),
         .payload_done   (payload_done),
         .payload_error  (payload_error)
     );
 
-    // ========================================================
-    // Clock
-    // ========================================================
-
     initial begin
         clk = 1'b0;
-
-        forever begin
-            #5 clk = ~clk;
-        end
+        forever #5 clk = ~clk;
     end
-
-    // ========================================================
-    // Waveform
-    // ========================================================
 
     initial begin
-        $dumpfile(
-            "tb/tb_image_burst_rx_deinterleaver.vcd"
-        );
-
-        $dumpvars(
-            0,
-            tb_image_burst_rx_deinterleaver
-        );
+        $dumpfile("tb/tb_image_burst_rx_deinterleaver.vcd");
+        $dumpvars(0, tb_image_burst_rx_deinterleaver);
     end
-
-    // ========================================================
-    // Push counter
-    // ========================================================
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -94,39 +64,24 @@ module tb_image_burst_rx_deinterleaver;
         end
     end
 
-    // ========================================================
-    // Reset task
-    // ========================================================
-
     task automatic apply_reset;
         begin
             rst_n         = 1'b0;
             start         = 1'b0;
-
             img_width     = '0;
             img_height    = '0;
-
             rx_byte       = '0;
             rx_byte_valid = 1'b0;
-
             fifo_ready    = 1'b1;
 
-            repeat (4) begin
-                @(posedge clk);
-            end
+            repeat (4) @(posedge clk);
 
             @(negedge clk);
             rst_n = 1'b1;
 
-            repeat (2) begin
-                @(posedge clk);
-            end
+            repeat (2) @(posedge clk);
         end
     endtask
-
-    // ========================================================
-    // Image-start task
-    // ========================================================
 
     task automatic start_image(
         input logic [15:0] width,
@@ -134,20 +89,14 @@ module tb_image_burst_rx_deinterleaver;
     );
         begin
             @(negedge clk);
-
             img_width  = width;
             img_height = height;
             start      = 1'b1;
 
             @(negedge clk);
-
             start = 1'b0;
         end
     endtask
-
-    // ========================================================
-    // UART-byte task
-    // ========================================================
 
     task automatic send_byte(
         input logic [7:0] data
@@ -156,20 +105,14 @@ module tb_image_burst_rx_deinterleaver;
             wait (payload_ready === 1'b1);
 
             @(negedge clk);
-
             rx_byte       = data;
             rx_byte_valid = 1'b1;
 
             @(negedge clk);
-
             rx_byte_valid = 1'b0;
             rx_byte       = '0;
         end
     endtask
-
-    // ========================================================
-    // RGB-pixel task
-    // ========================================================
 
     task automatic send_pixel(
         input logic [7:0] red,
@@ -183,10 +126,6 @@ module tb_image_burst_rx_deinterleaver;
         end
     endtask
 
-    // ========================================================
-    // FIFO-push checker
-    // ========================================================
-
     task automatic expect_fifo_push(
         input logic [31:0] expected_r,
         input logic [31:0] expected_g,
@@ -195,7 +134,6 @@ module tb_image_burst_rx_deinterleaver;
     );
         begin
             wait (fifo_push === 1'b1);
-
             #1;
 
             $display(
@@ -234,37 +172,60 @@ module tb_image_burst_rx_deinterleaver;
                 );
             end
 
-            if (payload_done !== expected_done) begin
-                $fatal(
-                    1,
-                    "payload_done mismatch: expected=%0b actual=%0b",
-                    expected_done,
-                    payload_done
-                );
-            end
+            /*
+            * fifo_push is combinational. For the final group,
+            * payload_done is generated on the following rising edge,
+            * after the FIFO samples the push and RGB data.
+            */
+            if (!expected_done) begin
+                if (payload_done !== 1'b0) begin
+                    $fatal(
+                        1,
+                        "payload_done asserted before final group"
+                    );
+                end
 
-            @(negedge clk);
+                @(negedge clk);
+            end
+            else begin
+                if (payload_done !== 1'b0) begin
+                    $fatal(
+                        1,
+                        "payload_done asserted too early during final push"
+                    );
+                end
+
+                @(posedge clk);
+                #1;
+
+                if (payload_done !== 1'b1) begin
+                    $fatal(
+                        1,
+                        "payload_done was not asserted after final FIFO push"
+                    );
+                end
+
+                if (payload_active !== 1'b0) begin
+                    $fatal(
+                        1,
+                        "payload_active did not clear after final FIFO push"
+                    );
+                end
+
+                @(negedge clk);
+            end
         end
     endtask
-
-    // ========================================================
-    // Main test
-    // ========================================================
 
     initial begin
         apply_reset();
 
-        // ====================================================
-        // TEST 1
-        // Complete group of four pixels
-        // ====================================================
-
         $display("");
         $display("========================================");
-        $display("TEST 1: Complete four-pixel group");
+        $display("TEST 1: Valid 16-pixel image");
         $display("========================================");
 
-        start_image(16'd4, 16'd1);
+        start_image(16'd16, 16'd1);
 
         wait (payload_active === 1'b1);
 
@@ -284,6 +245,42 @@ module tb_image_burst_rx_deinterleaver;
             32'h11121314,
             32'h21222324,
             32'h31323334,
+            1'b0
+        );
+
+        send_pixel(8'h15, 8'h25, 8'h35);
+        send_pixel(8'h16, 8'h26, 8'h36);
+        send_pixel(8'h17, 8'h27, 8'h37);
+        send_pixel(8'h18, 8'h28, 8'h38);
+
+        expect_fifo_push(
+            32'h15161718,
+            32'h25262728,
+            32'h35363738,
+            1'b0
+        );
+
+        send_pixel(8'h19, 8'h29, 8'h39);
+        send_pixel(8'h1A, 8'h2A, 8'h3A);
+        send_pixel(8'h1B, 8'h2B, 8'h3B);
+        send_pixel(8'h1C, 8'h2C, 8'h3C);
+
+        expect_fifo_push(
+            32'h191A1B1C,
+            32'h292A2B2C,
+            32'h393A3B3C,
+            1'b0
+        );
+
+        send_pixel(8'h1D, 8'h2D, 8'h3D);
+        send_pixel(8'h1E, 8'h2E, 8'h3E);
+        send_pixel(8'h1F, 8'h2F, 8'h3F);
+        send_pixel(8'h20, 8'h30, 8'h40);
+
+        expect_fifo_push(
+            32'h1D1E1F20,
+            32'h2D2E2F30,
+            32'h3D3E3F40,
             1'b1
         );
 
@@ -301,60 +298,18 @@ module tb_image_burst_rx_deinterleaver;
             );
         end
 
-        // ====================================================
-        // TEST 2
-        // Partial group of three pixels
-        // ====================================================
-
         $display("");
         $display("========================================");
-        $display("TEST 2: Partial three-pixel group");
+        $display("TEST 2: FIFO backpressure");
         $display("========================================");
 
-        start_image(16'd3, 16'd1);
+        apply_reset();
 
+        start_image(16'd16, 16'd1);
         wait (payload_active === 1'b1);
 
-        send_pixel(8'hA1, 8'hB1, 8'hC1);
-        send_pixel(8'hA2, 8'hB2, 8'hC2);
-        send_pixel(8'hA3, 8'hB3, 8'hC3);
-
-        expect_fifo_push(
-            32'hA1A2A300,
-            32'hB1B2B300,
-            32'hC1C2C300,
-            1'b1
-        );
-
-        if (payload_active !== 1'b0) begin
-            $fatal(
-                1,
-                "payload_active did not clear in TEST 2"
-            );
-        end
-
-        if (payload_error !== 1'b0) begin
-            $fatal(
-                1,
-                "Unexpected payload_error in TEST 2"
-            );
-        end
-
-        // ====================================================
-        // TEST 3
-        // FIFO backpressure
-        // ====================================================
-
-        $display("");
-        $display("========================================");
-        $display("TEST 3: FIFO backpressure");
-        $display("========================================");
-
+        @(negedge clk);
         fifo_ready = 1'b0;
-
-        start_image(16'd4, 16'd1);
-
-        wait (payload_active === 1'b1);
 
         send_pixel(8'h41, 8'h51, 8'h61);
         send_pixel(8'h42, 8'h52, 8'h62);
@@ -372,6 +327,15 @@ module tb_image_burst_rx_deinterleaver;
                     "fifo_push asserted while fifo_ready was low"
                 );
             end
+
+            if (fifo_r_data !== 32'h41424344 ||
+                fifo_g_data !== 32'h51525354 ||
+                fifo_b_data !== 32'h61626364) begin
+                $fatal(
+                    1,
+                    "FIFO data changed during backpressure"
+                );
+            end
         end
 
         @(negedge clk);
@@ -381,6 +345,42 @@ module tb_image_burst_rx_deinterleaver;
             32'h41424344,
             32'h51525354,
             32'h61626364,
+            1'b0
+        );
+
+        send_pixel(8'h45, 8'h55, 8'h65);
+        send_pixel(8'h46, 8'h56, 8'h66);
+        send_pixel(8'h47, 8'h57, 8'h67);
+        send_pixel(8'h48, 8'h58, 8'h68);
+
+        expect_fifo_push(
+            32'h45464748,
+            32'h55565758,
+            32'h65666768,
+            1'b0
+        );
+
+        send_pixel(8'h49, 8'h59, 8'h69);
+        send_pixel(8'h4A, 8'h5A, 8'h6A);
+        send_pixel(8'h4B, 8'h5B, 8'h6B);
+        send_pixel(8'h4C, 8'h5C, 8'h6C);
+
+        expect_fifo_push(
+            32'h494A4B4C,
+            32'h595A5B5C,
+            32'h696A6B6C,
+            1'b0
+        );
+
+        send_pixel(8'h4D, 8'h5D, 8'h6D);
+        send_pixel(8'h4E, 8'h5E, 8'h6E);
+        send_pixel(8'h4F, 8'h5F, 8'h6F);
+        send_pixel(8'h50, 8'h60, 8'h70);
+
+        expect_fifo_push(
+            32'h4D4E4F50,
+            32'h5D5E5F60,
+            32'h6D6E6F70,
             1'b1
         );
 
@@ -391,15 +391,35 @@ module tb_image_burst_rx_deinterleaver;
             );
         end
 
-        // ====================================================
-        // TEST 4
-        // Invalid zero-width image
-        // ====================================================
+        $display("");
+        $display("========================================");
+        $display("TEST 3: Invalid non-multiple-of-16 width");
+        $display("========================================");
+
+        apply_reset();
+
+        start_image(16'd4, 16'd1);
+
+        if (payload_error !== 1'b1) begin
+            $fatal(
+                1,
+                "Expected payload_error for width not divisible by 16"
+            );
+        end
+
+        if (payload_active !== 1'b0) begin
+            $fatal(
+                1,
+                "Invalid width entered payload-active state"
+            );
+        end
 
         $display("");
         $display("========================================");
-        $display("TEST 4: Invalid zero-width image");
+        $display("TEST 4: Invalid zero dimensions");
         $display("========================================");
+
+        apply_reset();
 
         start_image(16'd0, 16'd4);
 
@@ -413,19 +433,14 @@ module tb_image_burst_rx_deinterleaver;
         if (payload_active !== 1'b0) begin
             $fatal(
                 1,
-                "Invalid image entered payload-active state"
+                "Zero-width image entered payload-active state"
             );
         end
 
-        // ====================================================
-        // Final checks
-        // ====================================================
-
-        if (observed_push_count !== 3) begin
+        if (observed_push_count !== 0) begin
             $fatal(
                 1,
-                "Expected exactly 3 FIFO pushes, observed %0d",
-                observed_push_count
+                "Push counter was not reset before final test"
             );
         end
 
@@ -437,12 +452,8 @@ module tb_image_burst_rx_deinterleaver;
         $finish;
     end
 
-    // ========================================================
-    // Timeout protection
-    // ========================================================
-
     initial begin
-        #200000;
+        #400000;
 
         $fatal(
             1,
