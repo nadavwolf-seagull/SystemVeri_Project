@@ -30,4 +30,13 @@ set_clock_groups -logically_exclusive \
 set_false_path \
     -from [get_cells u_lab12_clock_wrapper/pll_locked_sync_reg] \
     -to [get_pins \
-        u_lab12_clock_wrapper/u_glitchless_clk_mux/u_bufgmux/S]
+        u_lab12_clock_wrapper/u_glitchless_clk_mux/u_bufgmux/CE1]
+
+ # Asynchronous board interfaces.
+set_false_path -from [get_ports CPU_RESETN]
+set_false_path -from [get_ports RX]
+set_false_path -from [get_ports UART_RTS]
+
+set_false_path -to [get_ports TX]
+set_false_path -to [get_ports UART_CTS]
+set_false_path -to [get_ports {LED[*]}]
