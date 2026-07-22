@@ -11,6 +11,9 @@ SIM_DIR  ?= $(SIM_NAME)-sim
 
 SRCS := \
 	$(UVM_DIR)/src/uvm.sv \
+	$(PROJECT_ROOT)/lab12_pkg.sv \
+	$(UVM_TB_DIR)/interfaces/dma_sequencer_if.sv \
+	$(PROJECT_ROOT)/rgb_dma_sequencer.sv \
 	$(UVM_TB_DIR)/dma_uvm_pkg.sv \
 	$(UVM_TB_DIR)/dma_uvm_top.sv
 
