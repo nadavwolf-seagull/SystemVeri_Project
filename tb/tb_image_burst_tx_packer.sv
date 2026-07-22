@@ -401,6 +401,9 @@ module tb_image_burst_tx_packer;
 
         start_image(16'd5, 16'd1);
 
+        wait (error === 1'b1);
+        #1;
+
         if (error !== 1'b1) begin
             $fatal(
                 1,
@@ -430,6 +433,9 @@ module tb_image_burst_tx_packer;
         apply_reset();
 
         start_image(16'd16, 16'd0);
+
+        wait (error === 1'b1);
+        #1;
 
         if (error !== 1'b1) begin
             $fatal(

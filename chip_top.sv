@@ -729,6 +729,9 @@ module chip_top #(
     rx_parser #(
         .MAX_FRAME_BYTES (RX_MAX_FRAME_BYTES)
     ) u_rx_parser (
+        .clk           (clk_uart),
+        .rst_n         (rst_uart_n),
+
         .frame_data    (rx_frame_data),
         .frame_len     (rx_frame_len),
         .frame_valid   (rx_frame_valid),

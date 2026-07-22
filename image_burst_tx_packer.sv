@@ -42,6 +42,8 @@ module image_burst_tx_packer #(
 
     typedef enum logic [2:0] {
         IDLE,
+        CHECK_CONFIG,
+        APPLY_CONFIG,
         REQUEST_WORD,
         WAIT_WORD,
         PRESENT_PACKET,
@@ -50,9 +52,21 @@ module image_burst_tx_packer #(
 
     state_t state;
 
-    logic [31:0] total_pixels;
-    logic [31:0] sent_pixels;
-    logic [2:0]  pixels_in_packet;
+    // One FIFO word always represents four pixels. Row/group counters avoid
+    // a width*height multiplier and a 32-bit compare on every packet_done.
+    logic [15:0] last_row;
+    logic [15:0] last_group_col;
+    logic [15:0] row_count;
+    logic [15:0] group_col;
+
+    logic [15:0] config_width;
+    logic [15:0] config_height;
+    logic        config_ok;
+
+    // The row/group counters do not change while a packet is being sent.
+    // Register their terminal comparisons before entering the packet path.
+    logic        row_is_last_q;
+    logic        group_is_last_q;
 
     logic [MAX_PACKET_WIDTH-1:0] packet_data_reg;
     logic [PACKET_LEN_WIDTH-1:0] packet_len_reg;
@@ -71,9 +85,17 @@ module image_burst_tx_packer #(
         if (!rst_n) begin
             state             <= IDLE;
 
-            total_pixels      <= '0;
-            sent_pixels       <= '0;
-            pixels_in_packet  <= '0;
+            last_row          <= '0;
+            last_group_col    <= '0;
+            row_count         <= '0;
+            group_col         <= '0;
+
+            config_width      <= '0;
+            config_height     <= '0;
+            config_ok         <= 1'b0;
+
+            row_is_last_q     <= 1'b0;
+            group_is_last_q   <= 1'b0;
 
             packet_data_reg   <= '0;
             packet_len_reg    <= '0;
@@ -98,22 +120,49 @@ module image_burst_tx_packer #(
                     active       <= 1'b0;
 
                     if (start) begin
-                        total_pixels <= img_width * img_height;
-                        sent_pixels  <= '0;
+                        // Capture the descriptor first. The descriptor bus
+                        // does not directly drive a wide FSM decision.
+                        config_width  <= img_width;
+                        config_height <= img_height;
+                        row_count     <= '0;
+                        group_col     <= '0;
+                        state         <= CHECK_CONFIG;
+                    end
+                end
 
-                        if ((img_width == 0) ||
-                            (img_height == 0) ||
-                            (img_width[3:0] != 4'b0000)) begin
-                            error <= 1'b1;
-                        end
-                        else begin
-                            active <= 1'b1;
-                            state  <= REQUEST_WORD;
-                        end
+                CHECK_CONFIG: begin
+                    // Register both the arithmetic and the validation.
+                    // The following state uses only config_ok.
+                    last_row <= config_height - 16'd1;
+                    last_group_col <=
+                        (config_width >> 2) - 16'd1;
+
+                    config_ok <=
+                        (config_width != 0) &&
+                        (config_height != 0) &&
+                        (config_width[3:0] == 4'b0000);
+
+                    state <= APPLY_CONFIG;
+                end
+
+                APPLY_CONFIG: begin
+                    if (config_ok) begin
+                        active <= 1'b1;
+                        state  <= REQUEST_WORD;
+                    end
+                    else begin
+                        error <= 1'b1;
+                        state <= IDLE;
                     end
                 end
 
                 REQUEST_WORD: begin
+                    row_is_last_q <=
+                        (row_count == last_row);
+
+                    group_is_last_q <=
+                        (group_col == last_group_col);
+
                     /*
                      * Wait until the DMA TX FIFO contains a complete
                      * group before requesting it.
@@ -155,7 +204,6 @@ module image_burst_tx_packer #(
 
                         // The INCR4-only DMA accepts complete 16-pixel rows,
                         // so every FIFO word always contains four pixels.
-                        pixels_in_packet <= 3'd4;
                         packet_len_reg   <= PACKET_LEN_WIDTH'(12);
 
                         packet_valid <= 1'b1;
@@ -176,25 +224,22 @@ module image_burst_tx_packer #(
 
                 WAIT_PACKET_DONE: begin
                     if (packet_done) begin
-                        if (
-                            (sent_pixels +
-                             {{29{1'b0}}, pixels_in_packet}) >=
-                            total_pixels
-                        ) begin
-                            sent_pixels <=
-                                sent_pixels +
-                                {{29{1'b0}}, pixels_in_packet};
+                        if (group_is_last_q) begin
+                            group_col <= '0;
 
-                            active <= 1'b0;
-                            done   <= 1'b1;
-                            state  <= IDLE;
+                            if (row_is_last_q) begin
+                                active <= 1'b0;
+                                done   <= 1'b1;
+                                state  <= IDLE;
+                            end
+                            else begin
+                                row_count <= row_count + 16'd1;
+                                state     <= REQUEST_WORD;
+                            end
                         end
                         else begin
-                            sent_pixels <=
-                                sent_pixels +
-                                {{29{1'b0}}, pixels_in_packet};
-
-                            state <= REQUEST_WORD;
+                            group_col <= group_col + 16'd1;
+                            state     <= REQUEST_WORD;
                         end
                     end
                 end
