@@ -55,6 +55,11 @@ module image_burst_rx_deinterleaver (
     assign fifo_g_data = g_word;
     assign fifo_b_data = b_word;
 
+    // The asynchronous FIFO samples push and data on the same rising edge.
+    // Keep the completed words stable while pending_push is set and assert
+    // push combinationally only when all three FIFO channels are ready.
+    assign fifo_push = pending_push && fifo_ready;
+
     /*
      * A new UART byte may be accepted while an image payload is active
      * and no completed four-pixel group is waiting for the FIFO.
@@ -79,14 +84,12 @@ module image_burst_rx_deinterleaver (
             pending_push        <= 1'b0;
             final_group_pending <= 1'b0;
 
-            fifo_push           <= 1'b0;
             payload_active      <= 1'b0;
             payload_done        <= 1'b0;
             payload_error       <= 1'b0;
         end
         else begin
             // One-cycle output pulses.
-            fifo_push     <= 1'b0;
             payload_done  <= 1'b0;
             payload_error <= 1'b0;
 
@@ -105,7 +108,12 @@ module image_burst_rx_deinterleaver (
                 pending_push        <= 1'b0;
                 final_group_pending <= 1'b0;
 
-                if ((img_width == 0) || (img_height == 0)) begin
+                // The current DMA issues complete INCR4 bursts. One burst
+                // represents 16 pixels, so partial rows are rejected by both
+                // ends of the datapath instead of leaving unmatched FIFO data.
+                if ((img_width == 0) ||
+                    (img_height == 0) ||
+                    (img_width[3:0] != 4'b0000)) begin
                     payload_active <= 1'b0;
                     payload_error  <= 1'b1;
                 end
@@ -130,7 +138,6 @@ module image_burst_rx_deinterleaver (
              */
             else if (pending_push) begin
                 if (fifo_ready) begin
-                    fifo_push    <= 1'b1;
                     pending_push <= 1'b0;
                     if (final_group_pending) begin
                         final_group_pending <= 1'b0;

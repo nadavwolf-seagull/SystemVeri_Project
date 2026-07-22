@@ -46,6 +46,7 @@ module final_project_dma_cluster #(
     output logic        rx_ready_fast,
     output logic        rx_almost_full_fast,
     output logic        rx_overflow_fast,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] rx_level_fast,
 
     // TX FIFO bank -> packer, fast domain.
     input  logic        tx_pop_fast,
@@ -56,12 +57,15 @@ module final_project_dma_cluster #(
     output logic        tx_data_valid_fast,
     output logic        tx_empty_fast,
     output logic        tx_underflow_fast,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] tx_level_fast,
 
     // System-domain FIFO error summaries for RGF/debug.
     input  logic [$clog2(FIFO_DEPTH+1)-1:0] rx_ae_level_sys,
     input  logic [$clog2(FIFO_DEPTH+1)-1:0] tx_af_free_level_sys,
     output logic        rx_underflow_sys,
-    output logic        tx_overflow_sys
+    output logic        tx_overflow_sys,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] rx_level_sys,
+    output logic [$clog2(FIFO_DEPTH+1)-1:0] tx_level_sys
 );
 
     ahb_lite_if ahb (
@@ -92,6 +96,16 @@ module final_project_dma_cluster #(
     logic [31:0] tx_b_data_sys;
     logic [2:0] tx_ready_sys;
     logic [2:0] tx_almost_full_sys;
+
+    logic ahb_bar_cmd_ready;
+    logic bar_access_allowed;
+
+    // Preserve image-transfer atomicity. A BAR request may be held valid while
+    // DMA is active, but it is accepted only after dma_busy returns low. Start
+    // pulses are included so a BAR request cannot slip in on the start cycle.
+    assign bar_access_allowed =
+        !dma_busy && !dma_wr_start && !dma_rd_start;
+    assign bar_cmd_ready = ahb_bar_cmd_ready && bar_access_allowed;
 
     rgb_dma_sequencer u_sequencer (
         .clk               (clk_sys),
@@ -133,8 +147,8 @@ module final_project_dma_cluster #(
     final_project_ahb_master_fsm u_ahb_master_fsm (
         .clk             (clk_sys),
         .rst_n           (rst_sys_n),
-        .bar_cmd_valid   (bar_cmd_valid),
-        .bar_cmd_ready   (bar_cmd_ready),
+        .bar_cmd_valid   (bar_cmd_valid && bar_access_allowed),
+        .bar_cmd_ready   (ahb_bar_cmd_ready),
         .bar_cmd_write   (bar_cmd_write),
         .bar_cmd_addr    (bar_cmd_addr),
         .bar_cmd_data    (bar_cmd_data),
@@ -171,6 +185,7 @@ module final_project_dma_cluster #(
         .rx_ready_fast         (rx_ready_fast),
         .rx_almost_full_fast   (rx_almost_full_fast),
         .rx_overflow_fast      (rx_overflow_fast),
+        .rx_level_fast         (rx_level_fast),
         .rx_pop_sys            (rx_pop_sys),
         .rx_ae_level_sys       (rx_ae_level_sys),
         .rx_r_data_sys         (rx_r_data_sys),
@@ -179,6 +194,7 @@ module final_project_dma_cluster #(
         .rx_data_valid_sys     (rx_data_valid_sys),
         .rx_empty_sys          (rx_empty_sys),
         .rx_underflow_sys      (rx_underflow_sys),
+        .rx_level_sys          (rx_level_sys),
         .tx_push_sys           (tx_push_sys),
         .tx_r_data_sys         (tx_r_data_sys),
         .tx_g_data_sys         (tx_g_data_sys),
@@ -187,6 +203,7 @@ module final_project_dma_cluster #(
         .tx_ready_sys          (tx_ready_sys),
         .tx_almost_full_sys    (tx_almost_full_sys),
         .tx_overflow_sys       (tx_overflow_sys),
+        .tx_level_sys          (tx_level_sys),
         .tx_pop_fast           (tx_pop_fast),
         .tx_ae_level_fast      (tx_ae_level_fast),
         .tx_r_data_fast        (tx_r_data_fast),
@@ -194,7 +211,8 @@ module final_project_dma_cluster #(
         .tx_b_data_fast        (tx_b_data_fast),
         .tx_data_valid_fast    (tx_data_valid_fast),
         .tx_empty_fast         (tx_empty_fast),
-        .tx_underflow_fast     (tx_underflow_fast)
+        .tx_underflow_fast     (tx_underflow_fast),
+        .tx_level_fast         (tx_level_fast)
     );
 
 endmodule

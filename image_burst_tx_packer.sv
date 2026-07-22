@@ -54,16 +54,18 @@ module image_burst_tx_packer #(
     logic [31:0] sent_pixels;
     logic [2:0]  pixels_in_packet;
 
-    logic [31:0] remaining_pixels;
-
-    assign remaining_pixels =
-        total_pixels - sent_pixels;
-
     logic [MAX_PACKET_WIDTH-1:0] packet_data_reg;
     logic [PACKET_LEN_WIDTH-1:0] packet_len_reg;
 
     assign packet_data = packet_data_reg;
     assign packet_len  = packet_len_reg;
+
+`ifndef SYNTHESIS
+    initial begin
+        if ((MAX_PACKET_BYTES != 12) || (MAX_PACKET_WIDTH != 96))
+            $fatal(1, "image_burst_tx_packer requires one 12-byte RGB group");
+    end
+`endif
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -99,7 +101,9 @@ module image_burst_tx_packer #(
                         total_pixels <= img_width * img_height;
                         sent_pixels  <= '0;
 
-                        if ((img_width == 0) || (img_height == 0)) begin
+                        if ((img_width == 0) ||
+                            (img_height == 0) ||
+                            (img_width[3:0] != 4'b0000)) begin
                             error <= 1'b1;
                         end
                         else begin
@@ -149,29 +153,10 @@ module image_burst_tx_packer #(
                             fifo_b_data[7:0]
                         };
 
-                        /*
-                         * The final FIFO word may contain fewer than
-                         * four valid pixels. Only the valid leading
-                         * bytes are transmitted.
-                         */
-                        if (remaining_pixels >= 32'd4) begin
-                            pixels_in_packet <= 3'd4;
-                            packet_len_reg   <= PACKET_LEN_WIDTH'(12);
-                        end
-                        else begin
-                            pixels_in_packet <= remaining_pixels[2:0];
-
-                            unique case (remaining_pixels[2:0])
-                                3'd1: packet_len_reg <= PACKET_LEN_WIDTH'(3);
-                                3'd2: packet_len_reg <= PACKET_LEN_WIDTH'(6);
-                                3'd3: packet_len_reg <= PACKET_LEN_WIDTH'(9);
-
-                                default: begin
-                                    packet_len_reg <= '0;
-                                    error          <= 1'b1;
-                                end
-                            endcase
-                        end
+                        // The INCR4-only DMA accepts complete 16-pixel rows,
+                        // so every FIFO word always contains four pixels.
+                        pixels_in_packet <= 3'd4;
+                        packet_len_reg   <= PACKET_LEN_WIDTH'(12);
 
                         packet_valid <= 1'b1;
                         state        <= PRESENT_PACKET;
@@ -192,11 +177,13 @@ module image_burst_tx_packer #(
                 WAIT_PACKET_DONE: begin
                     if (packet_done) begin
                         if (
-                            (sent_pixels + 32'(pixels_in_packet)) >=
+                            (sent_pixels +
+                             {{29{1'b0}}, pixels_in_packet}) >=
                             total_pixels
                         ) begin
                             sent_pixels <=
-                                sent_pixels + 32'(pixels_in_packet);
+                                sent_pixels +
+                                {{29{1'b0}}, pixels_in_packet};
 
                             active <= 1'b0;
                             done   <= 1'b1;
@@ -204,7 +191,8 @@ module image_burst_tx_packer #(
                         end
                         else begin
                             sent_pixels <=
-                                sent_pixels + 32'(pixels_in_packet);
+                                sent_pixels +
+                                {{29{1'b0}}, pixels_in_packet};
 
                             state <= REQUEST_WORD;
                         end
