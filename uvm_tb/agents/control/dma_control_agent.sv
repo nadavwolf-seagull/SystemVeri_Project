@@ -4,6 +4,7 @@ class dma_control_agent extends uvm_agent;
 
     dma_control_sequencer sequencer;
     dma_control_driver    driver;
+    dma_control_monitor   monitor;
 
     function new(
         string name = "dma_control_agent",
@@ -14,6 +15,13 @@ class dma_control_agent extends uvm_agent;
 
     function void build_phase(uvm_phase phase);
         super.build_phase(phase);
+
+        // Monitor is always created.
+        // Even a passive agent still observes DUT signals.
+        monitor = dma_control_monitor::type_id::create(
+            "monitor",
+            this
+        );
 
         if (get_is_active() == UVM_ACTIVE) begin
             sequencer = dma_control_sequencer::type_id::create(

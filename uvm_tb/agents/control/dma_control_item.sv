@@ -10,6 +10,11 @@ class dma_control_item extends uvm_sequence_item;
     rand logic [15:0]    img_width;
     rand logic [15:0]    img_height;
 
+    // Values observed by the monitor from the DUT outputs
+    logic observed_busy;
+    logic observed_done;
+    logic observed_error;
+
     constraint c_width {
         img_width inside {[16:256]};
         img_width % 16 == 0;
@@ -31,11 +36,14 @@ class dma_control_item extends uvm_sequence_item;
 
     function string convert2string();
         return $sformatf(
-            "direction=%s base=0x%06h width=%0d height=%0d",
+            "direction=%s base=0x%06h width=%0d height=%0d busy=%0b done=%0b error=%0b",
             (direction == DMA_WRITE) ? "WRITE" : "READ",
             img_base,
             img_width,
-            img_height
+            img_height,
+            observed_busy,
+            observed_done,
+            observed_error
         );
     endfunction
 

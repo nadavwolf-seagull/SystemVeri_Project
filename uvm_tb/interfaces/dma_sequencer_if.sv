@@ -52,25 +52,14 @@ interface dma_sequencer_if (
     logic [31:0] tx_fifo_b_data;
 
     task automatic drive_idle();
-        dma_wr_start       = 1'b0;
-        dma_rd_start       = 1'b0;
-        img_base           = '0;
-        img_width          = '0;
-        img_height         = '0;
 
-        seq_cmd_ready      = 1'b0;
+        // Signals owned by the DMA control driver only.
+        dma_wr_start = 1'b0;
+        dma_rd_start = 1'b0;
+        img_base     = '0;
+        img_width    = '0;
+        img_height   = '0;
 
-        seq_rsp_valid      = 1'b0;
-        seq_rsp_error      = 1'b0;
-        seq_rsp_rdata      = '0;
-
-        rx_fifo_empty      = 3'b111;
-        rx_fifo_data_valid = 3'b000;
-        rx_fifo_r_data     = '0;
-        rx_fifo_g_data     = '0;
-        rx_fifo_b_data     = '0;
-
-        tx_fifo_ready      = 3'b000;
     endtask
 
 endinterface
