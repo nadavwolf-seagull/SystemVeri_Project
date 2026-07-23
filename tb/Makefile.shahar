@@ -67,6 +67,18 @@ RTL_SRCS := \
     $(RTL_DIR)/rgb_sram_subsystem.sv \
     $(RTL_DIR)/ahb_pixel_slave.sv
 
+else ifeq ($(TOP),tb_config_rgf_start_bits)
+
+RTL_SRCS := \
+    $(RTL_DIR)/lab12_pkg.sv \
+    $(RTL_DIR)/config_rgf.sv
+
+else ifeq ($(TOP),tb_bar_pixel_write_then_read)
+
+RTL_SRCS := \
+    $(RTL_DIR)/lab12_pkg.sv \
+    $(RTL_DIR)/bar.sv
+
 else
 
 $(error Unsupported TOP="$(TOP)")
