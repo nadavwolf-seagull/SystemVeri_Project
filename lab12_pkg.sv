@@ -12,8 +12,8 @@ package lab12_pkg;
 
     parameter int unsigned UART_CLK_FREQ_HZ = 280_000_000;
 
-    parameter int unsigned UART_BAUD_RATE    = 17_500_000;
-    parameter int unsigned UART_CLKS_PER_BIT = 16;
+    parameter int unsigned UART_BAUD_RATE    = 4_375_000;
+    parameter int unsigned UART_CLKS_PER_BIT = 64;
     // ============================================================
     // IMAGE
     // ============================================================

@@ -240,7 +240,10 @@ module config_rgf #(
                     unique case (addr)
 
                         lab12_pkg::RGF_ADDR_CTRL: begin
+                            // START bits are write-one pulse controls and must not remain set.
                             ctrl_reg <= wr_data;
+                            ctrl_reg[lab12_pkg::RGF_CTRL_DMA_RD_START_BIT] <= 1'b0;
+                            ctrl_reg[lab12_pkg::RGF_CTRL_DMA_WR_START_BIT] <= 1'b0;
 
                             if (wr_data[lab12_pkg::RGF_CTRL_DMA_RD_START_BIT]) begin
                                 dma_rd_start      <= 1'b1;
