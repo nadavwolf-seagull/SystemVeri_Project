@@ -301,7 +301,9 @@ package lab12_pkg;
     parameter int unsigned RGF_ERROR_UART_PARITY_BIT  = 3;
     parameter int unsigned RGF_ERROR_UART_FRAMING_BIT = 4;
     parameter int unsigned RGF_ERROR_DMA_ERROR_BIT     = 5;
-
+    // Set when a burst payload byte was lost to a PHY error and
+    // replaced by a fill byte. The image completed but is not faithful.
+    parameter int unsigned RGF_ERROR_IMAGE_CORRUPT_BIT = 6;
     // ============================================================
     // VERSION REGISTER
     // ============================================================

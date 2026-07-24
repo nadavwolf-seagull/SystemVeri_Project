@@ -45,6 +45,7 @@ module apb_rgf_slave #(
     input  logic                  fifo_empty,
     input  logic                  fifo_full,
     input  logic                  fifo_error,
+    input  logic                  image_payload_corrupt,
 
     // UART PHY error inputs
     input  logic                  uart_parity_err,
@@ -179,6 +180,7 @@ module apb_rgf_slave #(
         .fifo_empty           (fifo_empty),
         .fifo_full            (fifo_full),
         .fifo_error           (fifo_error),
+        .image_payload_corrupt(image_payload_corrupt),
 
         .uart_parity_err      (uart_parity_err),
         .uart_framing_err     (uart_framing_err),
