@@ -6,6 +6,7 @@ class dma_env extends uvm_env;
     dma_scoreboard     scoreboard;
     dma_response_model response_model;
     dma_rx_fifo_model  rx_fifo_model;
+    dma_coverage_collector coverage_collector;
 
     function new(
         string name = "dma_env",
@@ -43,6 +44,12 @@ class dma_env extends uvm_env;
             "rx_fifo_model",
             this
         );
+
+        coverage_collector = dma_coverage_collector::type_id::create(
+            "coverage_collector",
+            this
+        );
+
     endfunction
 
     function void connect_phase(uvm_phase phase);
@@ -50,6 +57,10 @@ class dma_env extends uvm_env;
 
         control_agent.monitor.analysis_port.connect(
             scoreboard.analysis_export
+        );
+
+        control_agent.monitor.analysis_port.connect(
+            coverage_collector.analysis_export
         );
     endfunction
 
