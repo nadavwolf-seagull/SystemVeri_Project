@@ -10,10 +10,10 @@ package lab12_pkg;
     // SYSTEM / UART CLOCK
     // ============================================================
 
-    parameter int unsigned UART_CLK_FREQ_HZ = 280_000_000;
+    parameter int unsigned UART_CLK_FREQ_HZ = 256_000_000;
 
-    parameter int unsigned UART_BAUD_RATE    = 4_375_000;
-    parameter int unsigned UART_CLKS_PER_BIT = 64;
+    parameter int unsigned UART_BAUD_RATE    = 8_000_000;
+    parameter int unsigned UART_CLKS_PER_BIT = 32;
     // ============================================================
     // IMAGE
     // ============================================================
