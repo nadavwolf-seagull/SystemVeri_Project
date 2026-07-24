@@ -77,6 +77,14 @@ module board_top (
     logic rx_parity_error_dbg;
     logic rx_framing_error_dbg;
 
+    logic dbg_saw_rx_busy;
+    logic dbg_saw_frame;
+    logic dbg_saw_parity_error;
+    logic dbg_saw_framing_error;
+    logic dbg_saw_parse_error;
+    logic dbg_saw_classifier_error;
+    logic dbg_saw_rgf_error;
+    logic dbg_saw_tx_busy;
     // =========================================================
     // FINAL-PROJECT CLOCK AND RESET WRAPPER
     // =========================================================
@@ -190,19 +198,62 @@ module board_top (
         .uart_rx_busy         (uart_rx_busy),
         .uart_tx_busy         (uart_tx_busy)
     );
+    always_ff @(posedge clk_uart or negedge rst_uart_n) begin
+        if (!rst_uart_n) begin
+            dbg_saw_rx_busy          <= 1'b0;
+            dbg_saw_frame            <= 1'b0;
+            dbg_saw_parity_error     <= 1'b0;
+            dbg_saw_framing_error    <= 1'b0;
+            dbg_saw_parse_error      <= 1'b0;
+            dbg_saw_classifier_error <= 1'b0;
+            dbg_saw_rgf_error        <= 1'b0;
+            dbg_saw_tx_busy          <= 1'b0;
+        end
+        else begin
+            dbg_saw_rx_busy <=
+                dbg_saw_rx_busy |
+                uart_rx_busy;
 
+            dbg_saw_frame <=
+                dbg_saw_frame |
+                rx_frame_valid;
+
+            dbg_saw_parity_error <=
+                dbg_saw_parity_error |
+                rx_parity_error_dbg;
+
+            dbg_saw_framing_error <=
+                dbg_saw_framing_error |
+                rx_framing_error_dbg;
+
+            dbg_saw_parse_error <=
+                dbg_saw_parse_error |
+                rx_parse_error;
+
+            dbg_saw_classifier_error <=
+                dbg_saw_classifier_error |
+                rx_classifier_error;
+
+            dbg_saw_rgf_error <=
+                dbg_saw_rgf_error |
+                rgf_error;
+
+            dbg_saw_tx_busy <=
+                dbg_saw_tx_busy |
+                uart_tx_busy;
+        end
+    end
     // =========================================================
     // LED DEBUG OUTPUTS
     // =========================================================
-    assign LED[0]  = rx_frame_valid;
-    assign LED[1]  = seq_busy;
-    assign LED[2]  = seq_transfer_done;
-    assign LED[3]  = composer_busy;
-    assign LED[4]  = packet_busy;
-    assign LED[5]  = image_tx_done;
-
-    assign LED[6]  = fifo_empty;
-    assign LED[7]  = fifo_half_full;
+    assign LED[0] = dbg_saw_rx_busy;
+    assign LED[1] = dbg_saw_frame;
+    assign LED[2] = dbg_saw_parity_error;
+    assign LED[3] = dbg_saw_framing_error;
+    assign LED[4] = dbg_saw_parse_error;
+    assign LED[5] = dbg_saw_classifier_error;
+    assign LED[6] = dbg_saw_rgf_error;
+    assign LED[7] = dbg_saw_tx_busy;
     assign LED[8]  = fifo_almost_empty;
     assign LED[9]  = fifo_almost_full;
     assign LED[10] = fifo_full;
