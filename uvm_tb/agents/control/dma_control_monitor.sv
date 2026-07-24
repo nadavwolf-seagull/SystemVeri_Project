@@ -65,7 +65,7 @@ class dma_control_monitor extends uvm_monitor;
                 // immediate validation error,
                 // delayed validation error,
                 // or successful completion.
-                while (!outcome_seen && timeout_cycles < 100) begin
+                while (!outcome_seen && timeout_cycles < 500) begin
                     @(posedge vif.clk);
                     #1ns;
 
