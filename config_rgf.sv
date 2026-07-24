@@ -41,6 +41,7 @@ module config_rgf #(
     input  logic                  fifo_empty,
     input  logic                  fifo_full,
     input  logic                  fifo_error,
+    input  logic                  image_payload_corrupt,
 
     // LAB11 UART PHY error inputs
     input  logic                  uart_parity_err,
@@ -205,6 +206,13 @@ module config_rgf #(
             // Latch external FIFO error into ERROR_STATUS
             if (fifo_error) begin
                 error_status_reg[lab12_pkg::RGF_ERROR_FIFO_ERROR_BIT] <= 1'b1;
+            end
+
+            // Latch a corrupted image payload. Level from the UART domain,
+            // already synchronised at the top level.
+            if (image_payload_corrupt) begin
+                error_status_reg[lab12_pkg::RGF_ERROR_IMAGE_CORRUPT_BIT]
+                    <= 1'b1;
             end
 
             // Latch DMA error into ERROR_STATUS

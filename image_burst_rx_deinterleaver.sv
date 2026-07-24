@@ -16,6 +16,12 @@ module image_burst_rx_deinterleaver (
     input  logic [7:0]  rx_byte,
     input  logic        rx_byte_valid,
 
+    // PHY-level error for the byte that was just received. The RX PHY
+    // asserts exactly one of {rx_byte_valid, framing_err, parity_err} per
+    // UART frame, so this is the "the byte arrived but was unusable" event
+    // and it keeps a strict one-pulse-per-frame accounting.
+    input  logic        phy_error,
+
     // Interface toward the DMA RX FIFO bank.
     input  logic        fifo_ready,
 
@@ -28,8 +34,19 @@ module image_burst_rx_deinterleaver (
     output logic        payload_active,
     output logic        payload_ready,
     output logic        payload_done,
-    output logic        payload_error
+    output logic        payload_error,
+
+    // Sticky for the duration of one payload: at least one byte of this
+    // image was lost to a PHY error and replaced by PAYLOAD_FILL_BYTE.
+    // Cleared by the next start pulse. The image is still fully received
+    // and the DMA still completes; the host uses this to decide whether
+    // to retransmit.
+    output logic        payload_corrupt
 );
+
+    // Substituted for any byte the PHY rejected. Black keeps the damage
+    // visually obvious rather than blending into the picture.
+    localparam logic [7:0] PAYLOAD_FILL_BYTE = 8'h00;
 
     typedef enum logic [2:0] {
         RX_IDLE,
@@ -112,6 +129,7 @@ module image_burst_rx_deinterleaver (
             payload_active           <= 1'b0;
             payload_done             <= 1'b0;
             payload_error            <= 1'b0;
+            payload_corrupt          <= 1'b0;
         end
         else begin
             // One-cycle status pulses.
@@ -143,6 +161,7 @@ module image_burst_rx_deinterleaver (
 
                 final_group_pending      <= 1'b0;
                 payload_active           <= 1'b0;
+                payload_corrupt          <= 1'b0;
             end
             else begin
                 unique case (state)
@@ -196,16 +215,29 @@ module image_burst_rx_deinterleaver (
                     end
 
                     RX_WAIT_BYTE: begin
-                        if (rx_byte_valid) begin
-                            rx_byte_q <= rx_byte;
+                        // Accept the frame on either outcome. The PHY emits
+                        // exactly one of rx_byte_valid / phy_error per UART
+                        // frame, so counting both keeps the byte index and
+                        // the R/G/B phase aligned with what the host sent.
+                        // Without this, a rejected byte silently shifts the
+                        // whole remainder of the image by one position and
+                        // steals a byte from the following message.
+                        if (rx_byte_valid || phy_error) begin
+                            rx_byte_q <= phy_error ? PAYLOAD_FILL_BYTE
+                                                   : rx_byte;
                             state     <= RX_PROCESS_BYTE;
+
+                            if (phy_error) begin
+                                payload_corrupt <= 1'b1;
+                            end
                         end
                     end
 
                     RX_PROCESS_BYTE: begin
                         // A new byte while payload_ready is low violates the
-                        // source-side ready/valid contract.
-                        if (rx_byte_valid) begin
+                        // source-side ready/valid contract. A rejected frame
+                        // occupies the same slot on the wire, so it counts.
+                        if (rx_byte_valid || phy_error) begin
                             payload_error <= 1'b1;
                         end
 

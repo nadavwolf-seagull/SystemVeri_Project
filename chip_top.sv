@@ -385,6 +385,8 @@ module chip_top #(
     logic        image_payload_ready;
     logic        image_payload_done;
     logic        image_payload_error;
+    logic        image_payload_corrupt;
+    logic        image_payload_corrupt_sys;
     logic        image_write_command_pending;
 
     assign uart_tx_busy = packet_busy;
@@ -688,10 +690,16 @@ module chip_top #(
         .fifo_g_data    (dma_rx_g_data_fast),
         .fifo_b_data    (dma_rx_b_data_fast),
 
+        .phy_error      (
+            (rx_parity_err || rx_framing_err) &&
+            image_payload_active
+        ),
+
         .payload_active (image_payload_active),
         .payload_ready  (image_payload_ready),
         .payload_done   (image_payload_done),
-        .payload_error  (image_payload_error)
+        .payload_error  (image_payload_error),
+        .payload_corrupt(image_payload_corrupt)
     );
 
     // =========================================================
@@ -934,6 +942,7 @@ module chip_top #(
         .fifo_empty           (dma_tx_empty_sys),
         .fifo_full            (dma_rx_full_sys),
         .fifo_error           (fifo_error),
+        .image_payload_corrupt(image_payload_corrupt_sys),
 
         .uart_parity_err      (fast_status_event_sys[0]),
         .uart_framing_err     (fast_status_event_sys[1]),
@@ -1072,6 +1081,13 @@ module chip_top #(
         .rst_n    (rst_ctrl_n),
         .async_in (dma_tx_empty_fast_cdc),
         .sync_out (dma_tx_empty_sys)
+    );
+
+    cdc_2ff_sync u_payload_corrupt_2ff (
+        .clk      (clk_ctrl),
+        .rst_n    (rst_ctrl_n),
+        .async_in (image_payload_corrupt),
+        .sync_out (image_payload_corrupt_sys)
     );
 
     cdc_2ff_sync u_rx_full_2ff (
