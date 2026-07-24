@@ -2,9 +2,10 @@ class dma_env extends uvm_env;
 
     `uvm_component_utils(dma_env)
 
-    dma_control_agent control_agent;
+    dma_control_agent  control_agent;
     dma_scoreboard     scoreboard;
     dma_response_model response_model;
+    dma_rx_fifo_model  rx_fifo_model;
 
     function new(
         string name = "dma_env",
@@ -35,6 +36,11 @@ class dma_env extends uvm_env;
 
         response_model = dma_response_model::type_id::create(
             "response_model",
+            this
+        );
+
+        rx_fifo_model = dma_rx_fifo_model::type_id::create(
+            "rx_fifo_model",
             this
         );
     endfunction

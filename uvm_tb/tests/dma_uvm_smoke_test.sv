@@ -24,6 +24,7 @@ class dma_uvm_smoke_test extends uvm_test;
 
         dma_validation_sequence validation_seq;
         dma_valid_read_sequence valid_read_seq;
+        dma_valid_write_sequence valid_write_seq;
 
         phase.raise_objection(
             this,
@@ -36,6 +37,10 @@ class dma_uvm_smoke_test extends uvm_test;
 
         valid_read_seq = dma_valid_read_sequence::type_id::create(
             "valid_read_seq"
+        );
+
+        valid_write_seq = dma_valid_write_sequence::type_id::create(
+            "valid_write_seq"
         );
 
         validation_seq.start(
@@ -55,6 +60,16 @@ class dma_uvm_smoke_test extends uvm_test;
         `uvm_info(
             "DMA_UVM_SMOKE",
             "Legal DMA READ sequence completed",
+            UVM_LOW
+        )
+
+        valid_write_seq.start(
+            env.control_agent.sequencer
+        );
+
+        `uvm_info(
+            "DMA_UVM_SMOKE",
+            "Legal DMA WRITE sequence completed",
             UVM_LOW
         )
 
