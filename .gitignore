@@ -1,2 +1,5 @@
 uvm_tb/sim/dma_uvm_top-sim/
 final_project_board.zip
+uvm_tb/*/sim/*.o
+uvm_tb/*/sim/*.d
+uvm_tb/*/sim/*-sim/

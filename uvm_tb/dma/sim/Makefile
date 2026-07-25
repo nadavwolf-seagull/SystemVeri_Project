@@ -1,8 +1,8 @@
 VERILATOR ?= verilator
 NPROC     := $(shell nproc)
 
-PROJECT_ROOT := $(abspath ../..)
-UVM_TB_DIR   := $(PROJECT_ROOT)/uvm_tb
+PROJECT_ROOT := $(abspath ../../..)
+DMA_TB_DIR   := $(PROJECT_ROOT)/uvm_tb/dma
 UVM_DIR      := $(HOME)/my_projects/cdv_feb26/third-party/uvm-latest
 
 TOP      ?= dma_uvm_top
@@ -10,16 +10,16 @@ SIM_NAME ?= $(TOP)
 SIM_DIR  ?= $(SIM_NAME)-sim
 
 SRCS := \
-	$(UVM_DIR)/src/uvm.sv \
-	$(PROJECT_ROOT)/lab12_pkg.sv \
-	$(UVM_TB_DIR)/interfaces/dma_sequencer_if.sv \
-	$(PROJECT_ROOT)/rgb_dma_sequencer.sv \
-	$(UVM_TB_DIR)/dma_uvm_pkg.sv \
-	$(UVM_TB_DIR)/dma_uvm_top.sv
+        $(UVM_DIR)/src/uvm.sv \
+        $(PROJECT_ROOT)/lab12_pkg.sv \
+        $(DMA_TB_DIR)/interfaces/dma_sequencer_if.sv \
+        $(PROJECT_ROOT)/rgb_dma_sequencer.sv \
+        $(DMA_TB_DIR)/dma_uvm_pkg.sv \
+        $(DMA_TB_DIR)/dma_uvm_top.sv
 
 VERILOG_INCLUDE_DIRS := \
-	$(UVM_DIR)/src \
-	$(UVM_TB_DIR)
+        $(UVM_DIR)/src \
+        $(DMA_TB_DIR)
 
 $(SIM_DIR)/$(SIM_NAME).mk:
 	$(VERILATOR) \
