@@ -140,7 +140,7 @@ module integration_uvm_top;
             vif
         );
 
-        run_test("integration_smoke_test");
+        run_test();
     end
 
     // =========================================================

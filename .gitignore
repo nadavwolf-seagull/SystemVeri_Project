@@ -4,4 +4,3 @@ uvm_tb/*/sim/*.o
 uvm_tb/*/sim/*.d
 uvm_tb/*/sim/*-sim/
 rx_deinterleaver_multicycle_impl.xdc
-integration_uvm_top.fst
