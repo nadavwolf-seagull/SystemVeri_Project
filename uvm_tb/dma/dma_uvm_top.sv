@@ -74,7 +74,9 @@ module dma_uvm_top;
             "vif",
             dma_if
         );
-
+        
+        $dumpfile("dma_uvm_top.fst");
+        $dumpvars(0, dma_uvm_top);
         run_test("dma_uvm_smoke_test");
     end
 
