@@ -30,12 +30,14 @@ package integration_uvm_pkg;
     `include "sequences/integration_invalid_command_sequence.sv"
     `include "sequences/integration_control_sequence.sv"
     `include "sequences/integration_pixel_sequence.sv"
+    `include "sequences/integration_dma_burst_sequence.sv"
 
     // Tests
     `include "tests/integration_smoke_test.sv"
     `include "tests/integration_invalid_command_test.sv"
     `include "tests/integration_control_test.sv"
     `include "tests/integration_pixel_test.sv"
+    `include "tests/integration_dma_burst_test.sv"
 
 endpackage
 

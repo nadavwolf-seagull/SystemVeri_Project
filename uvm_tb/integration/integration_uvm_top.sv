@@ -130,6 +130,40 @@ module integration_uvm_top;
     );
 
     // =========================================================
+    // AHB observation connections
+    //
+    // The AHB interface belongs to the real DMA cluster inside
+    // chip_top. These assignments expose it to the UVM test for
+    // protocol checking only.
+    // =========================================================
+    assign vif.ahb_haddr =
+        dut.u_final_project_dma_cluster.ahb.HADDR;
+
+    assign vif.ahb_hwrite =
+        dut.u_final_project_dma_cluster.ahb.HWRITE;
+
+    assign vif.ahb_htrans =
+        dut.u_final_project_dma_cluster.ahb.HTRANS;
+
+    assign vif.ahb_hburst =
+        dut.u_final_project_dma_cluster.ahb.HBURST;
+
+    assign vif.ahb_hsize =
+        dut.u_final_project_dma_cluster.ahb.HSIZE;
+
+    assign vif.ahb_hwdata =
+        dut.u_final_project_dma_cluster.ahb.HWDATA;
+
+    assign vif.ahb_hrdata =
+        dut.u_final_project_dma_cluster.ahb.HRDATA;
+
+    assign vif.ahb_hready =
+        dut.u_final_project_dma_cluster.ahb.HREADY;
+
+    assign vif.ahb_hresp =
+        dut.u_final_project_dma_cluster.ahb.HRESP;
+
+    // =========================================================
     // UVM startup
     // =========================================================
     initial begin

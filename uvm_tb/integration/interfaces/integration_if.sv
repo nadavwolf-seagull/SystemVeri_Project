@@ -71,6 +71,24 @@ interface integration_if;
     logic uart_rx_busy;
     logic uart_tx_busy;
 
+    // =========================================================
+    // AHB debug signals
+    //
+    // These signals are observed only by the integration UVM
+    // environment. They do not modify the RTL functionality.
+    // =========================================================
+    logic [lab12_pkg::AHB_ADDR_WIDTH-1:0] ahb_haddr;
+    logic                                 ahb_hwrite;
+    logic [1:0]                           ahb_htrans;
+    logic [2:0]                           ahb_hburst;
+    logic [2:0]                           ahb_hsize;
+
+    logic [lab12_pkg::AHB_DATA_WIDTH-1:0] ahb_hwdata;
+    logic [lab12_pkg::AHB_DATA_WIDTH-1:0] ahb_hrdata;
+
+    logic                                 ahb_hready;
+    logic                                 ahb_hresp;
+
 endinterface
 
 `endif
